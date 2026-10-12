@@ -1,0 +1,19 @@
+[project]
+name = "wingstats"
+version = "0.3.0"
+description = "Wingfoil session statistics (air time, jibes, falls) from Garmin Connect exports"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+wingstats = "wingstats.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["wingstats"]

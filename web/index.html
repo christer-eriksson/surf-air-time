@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wingfoil stats</title>
+<meta name="description" content="Air time, jibes and full stops from a Garmin Connect wingfoil export. Runs entirely in your browser.">
+<style>
+:root{color-scheme:light;
+ --surface:#fcfcfb;--plane:#f9f9f7;--ink:#0b0b0b;--ink-2:#52514e;--muted:#898781;--grid:#e1e0d9;--axis:#c3c2b7;
+ --border:rgba(11,11,11,.10);--s1:#2a78d6;--s1-wash:rgba(42,120,214,.10);--off:#b8b7b0;
+ --good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--tip-bg:#ffffff;--err-bg:#fde8e8;--err-ink:#7a1f1f}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){color-scheme:dark;
+ --surface:#1a1a19;--plane:#0d0d0d;--ink:#f0efec;--ink-2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;
+ --border:rgba(255,255,255,.10);--s1:#3987e5;--s1-wash:rgba(57,135,229,.14);--off:#55554f;--tip-bg:#242423;--err-bg:#3a1a1a;--err-ink:#f3b4b4}}
+:root[data-theme="dark"]{color-scheme:dark;
+ --surface:#1a1a19;--plane:#0d0d0d;--ink:#f0efec;--ink-2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;
+ --border:rgba(255,255,255,.10);--s1:#3987e5;--s1-wash:rgba(57,135,229,.14);--off:#55554f;--tip-bg:#242423;--err-bg:#3a1a1a;--err-ink:#f3b4b4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:26px;margin:0 0 4px;font-weight:650}
+h2{font-size:17px;margin:32px 0 10px;font-weight:600}
+.sub{color:var(--ink-2);margin:0 0 20px;font-size:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi .label{color:var(--ink-2);font-size:13px}
+.kpi .value{font-size:30px;font-weight:600;line-height:1.1;margin:4px 0 2px}
+.kpi .note{color:var(--muted);font-size:12.5px}
+.kpi.hero .value{font-size:48px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--ink-2);font-size:13px;margin:0 0 8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.key-line{width:18px;height:0;border-top:2px solid var(--s1)}
+.key-rect{width:14px;height:12px;background:var(--s1-wash);border:1px solid var(--s1)}
+.key-dot{width:10px;height:10px;border-radius:50%}
+svg{display:block;width:100%;height:auto;overflow:visible}
+svg text{font-family:inherit;fill:var(--muted);font-size:12px}
+svg .tick{font-variant-numeric:tabular-nums}
+svg .grid{stroke:var(--grid);stroke-width:1}
+svg .axis{stroke:var(--axis);stroke-width:1}
+svg .line{fill:none;stroke:var(--s1);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+svg .wash{fill:var(--s1-wash)}
+svg .thresh{stroke:var(--axis);stroke-width:1}
+svg .track-off{fill:none;stroke:var(--off);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+svg .track-on{fill:none;stroke:var(--s1);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+svg .m{stroke:var(--surface);stroke-width:2}
+svg .m.clean{fill:var(--good)} svg .m.touchdown{fill:var(--warn)} svg .m.stop{fill:var(--crit)}
+svg .m.tack{fill:var(--surface);stroke:var(--ink-2);stroke-width:2}
+svg g.openable{cursor:pointer} svg g.openable:hover .bar{opacity:.8}
+svg .bar-outer{fill:var(--s1-wash);stroke:var(--s1);stroke-width:1}
+tr.tack td{color:var(--muted)}
+.notice{background:var(--surface);border:1px solid var(--axis);border-radius:8px;padding:10px 14px;margin:0 0 16px;color:var(--ink-2);font-size:14px}
+svg .x-fall{stroke:var(--crit);stroke-width:2;stroke-linecap:round}
+svg .bar{fill:var(--s1)} svg .bar:hover{fill-opacity:.8}
+svg .hit{fill:transparent;stroke:none;cursor:crosshair}
+svg .cross{stroke:var(--ink-2);stroke-width:1;display:none}
+svg .lbl{fill:var(--ink-2);font-size:12px}
+svg .num{fill:var(--ink);font-size:11px;font-weight:600}
+.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--ink);border:1px solid var(--border);
+ border-radius:8px;padding:8px 10px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.12);display:none;z-index:9;min-width:150px}
+.tip b{font-size:15px}
+.tip .k{color:var(--ink-2);margin-left:6px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums;white-space:nowrap}
+th{color:var(--ink-2);font-weight:600} th:first-child,td:first-child,th.l,td.l{text-align:left}
+tr:hover td{background:var(--s1-wash)}
+.pill{display:inline-flex;align-items:center;gap:5px;color:var(--ink);font-weight:500}
+.pill i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.pill.clean i{background:var(--good)}.pill.touchdown i{background:var(--warn)}.pill.stop i{background:var(--crit)}
+details{margin-top:24px;color:var(--ink-2);font-size:14px} summary{cursor:pointer;color:var(--ink);font-weight:600}
+details p{margin:8px 0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.stack{display:grid;grid-template-columns:1fr;gap:20px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+/* upload UI */
+.drop{display:block;border:2px dashed var(--axis);border-radius:10px;padding:26px 16px;text-align:center;color:var(--ink-2);cursor:pointer;transition:border-color .15s,background .15s}
+.drop.over,.drop:hover{border-color:var(--s1);background:var(--s1-wash)}
+.drop b{color:var(--ink)}
+.drop input{display:none}
+.fields{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:8px}
+.fields label{display:block;font-weight:600;font-size:14px;margin:8px 0 3px}
+.fields small{color:var(--ink-2);font-weight:400}
+input[type=number]{width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--plane);color:var(--ink);font:inherit}
+button{padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+button.primary{background:var(--s1);color:#fff;border-color:transparent}
+button:disabled{opacity:.6;cursor:default}
+button.small{padding:4px 10px;font-size:13px;font-weight:500}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 0}
+.err{background:var(--err-bg);color:var(--err-ink);border-radius:8px;padding:12px 14px;margin:12px 0 0}
+.hidden{display:none}
+.status{color:var(--ink-2);font-size:14px;margin:10px 0 0}
+.status:empty{display:none}
+#history-empty{color:var(--ink-2);font-size:14px;margin:0}
+td .small{margin-left:4px}
+.note{color:var(--muted);font-size:12.5px;margin:8px 0 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Wingfoil stats</h1>
+<p class="sub">Air time, jibes and full stops from a Garmin Connect export. Everything runs in your browser: the file is never uploaded, and your session history is kept only on this device.</p>
+
+<section id="upload" class="card">
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept=".tcx,.gpx" multiple>
+    <b>Drop one or more .tcx or .gpx files here</b> or click to choose<br><small>Export them from the activity page in Garmin Connect (gear icon → Export to TCX). TCX has the watch's own speed and is preferred. Files already in your history and other file types are skipped.</small>
+  </label>
+  <p class="status" id="status"></p>
+  <div class="err hidden" id="error"></div>
+</section>
+
+<section id="history-section">
+  <h2>Your sessions <small style="color:var(--muted);font-weight:400">(stored in this browser only)</small></h2>
+  <div class="card">
+    <p id="history-empty">No sessions yet. Analyse a file and it is remembered here so you can compare sessions over time.</p>
+    <div id="history-charts" class="stack hidden"></div>
+    <div id="history-table" style="overflow:auto"></div>
+    <div class="actions hidden" id="history-actions">
+      <button class="small" id="export-history">Export history (JSON)</button>
+      <button class="small" id="clear-history">Delete all sessions</button>
+    </div>
+  </div>
+</section>
+
+<section id="report" class="hidden"></section>
+</main>
+<div id="tip" class="tip"></div>
+<script src="wingstats.js?v=0.3.0"></script>
+<script>
+(function () {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mmss = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60; const p = v => (v < 10 ? '0' : '') + v; return h ? `${h}:${p(m)}:${p(r)}` : `${m}:${p(r)}`; };
+const compass = d => d == null ? '?' : ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.floor(((d + 11.25) % 360) / 22.5) % 16];
+const f1 = v => v.toFixed(1), f0 = v => v.toFixed(0);
+const tipAttr = rows => `data-tip="${esc(JSON.stringify(rows))}"`;
+const niceMax = (v, step) => v > 0 ? Math.ceil(v / step) * step : step;
+
+// ------------------------------------------------------------ report rendering
+function turnRows(t) {
+  return [[`${t.kind === 'tack' ? 'Tack' : 'Jibe'} ${t.idx}: ${t.outcome === 'stop' ? 'full stop' : t.outcome}${t.aborted ? ' (aborted)' : ''}`, ''], [mmss(t.mid_s), 'time'],
+    [`${f1(t.entry_speed_kmh)} → ${f1(t.min_speed_kmh)} → ${f1(t.exit_speed_kmh)} km/h`, 'entry → min → exit'], [`${f1(t.speed_after_kmh)} km/h`, '10 s after'],
+    [`${f0(t.retention * 100)}%`, 'speed retained'], [`${f0(t.score)} (${t.grade})`, 'score'], [`turning ${t.direction}, ${f0(Math.abs(t.heading_change_deg))}°`, 'turn']];
+}
+function stopRows(f) {
+  return [[`Full stop (${f.likely})`, ''], [mmss(f.time_s), 'time'], [`${f1(f.speed_before_kmh)} km/h`, 'speed before'], [mmss(f.stopped_s), 'standing still'],
+    [f.recovery_s == null ? 'never' : mmss(f.recovery_s), 'back flying after']];
+}
+function kpi(label, value, note, hero) {
+  return `<div class="card kpi${hero ? ' hero' : ''}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="note">${esc(note)}</div></div>`;
+}
+function timeline(a) {
+  const tr = a.track, p = a.params, W = 1060, H = 280, x0 = 44, x1 = W - 12, y0 = 14, y1 = H - 36, n = tr.n;
+  const vmax = niceMax(Math.max(...tr.speed) * 1.05, 5);
+  const X = i => x0 + (x1 - x0) * i / (n - 1), Y = v => y1 - (y1 - y0) * v / vmax;
+  const o = [`<svg id="timeline" viewBox="0 0 ${W} ${H}" data-x0="${x0}" data-x1="${x1}" data-y0="${y0}" data-y1="${y1}" data-vmax="${vmax}" role="img" aria-label="Speed over time with flying periods and jibe markers">`];
+  for (const f of a.flights) { const s = Math.floor(f.start_s), e = Math.floor(f.end_s) + 1; o.push(`<rect class="wash" x="${X(s).toFixed(1)}" y="${y0}" width="${Math.max(1, X(e) - X(s)).toFixed(1)}" height="${y1 - y0}"/>`); }
+  const step = vmax <= 40 ? 5 : 10;
+  for (let v = 0; v <= vmax + 0.1; v += step) { o.push(`<line class="grid" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="tick" x="${x0 - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`); }
+  o.push(`<line class="thresh" x1="${x0}" x2="${x1}" y1="${Y(p.flyOff).toFixed(1)}" y2="${Y(p.flyOff).toFixed(1)}"/><text class="lbl" x="${x0 + 4}" y="${(Y(p.flyOff) - 4).toFixed(1)}">flight lost below ${f0(p.flyOff)} km/h</text>`);
+  for (let s = 0; s < n; s += 300) o.push(`<line class="axis" x1="${X(s).toFixed(1)}" x2="${X(s).toFixed(1)}" y1="${y1}" y2="${y1 + 4}"/><text class="tick" x="${X(s).toFixed(1)}" y="${y1 + 18}" text-anchor="middle">${mmss(s)}</text>`);
+  o.push(`<line class="axis" x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}"/>`);
+  const stride = Math.max(1, Math.floor(n / 1400)), pts = [];
+  for (let i = 0; i < n; i += stride) pts.push(`${X(i).toFixed(1)},${Y(tr.speed[i]).toFixed(1)}`);
+  o.push(`<polyline class="line" points="${pts.join(' ')}"/>`);
+  for (const f of a.stops) if (f.in_turn === null) { const x = X(Math.floor(f.time_s)), y = Y(f.speed_before_kmh) - 12;
+    o.push(`<g class="x-fall" tabindex="0" ${tipAttr(stopRows(f))}><line x1="${(x - 5).toFixed(1)}" y1="${(y - 5).toFixed(1)}" x2="${(x + 5).toFixed(1)}" y2="${(y + 5).toFixed(1)}"/><line x1="${(x - 5).toFixed(1)}" y1="${(y + 5).toFixed(1)}" x2="${(x + 5).toFixed(1)}" y2="${(y - 5).toFixed(1)}"/><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" style="pointer-events:all"/></g>`); }
+  for (const t of a.turns) { const x = X(Math.floor(t.mid_s)), y = Y(t.entry_speed_kmh) - 14;
+    o.push(`<g tabindex="0" ${tipAttr(turnRows(t))}><circle class="m ${t.kind === 'tack' ? 'tack' : t.outcome}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5"/><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" style="pointer-events:all"/></g>`); }
+  o.push(`<line class="cross" x1="0" x2="0" y1="${y0}" y2="${y1}"/><circle class="cdot m" cx="0" cy="0" r="5" style="display:none;fill:var(--s1)"/><rect class="hit" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/></svg>`);
+  return o.join('\n');
+}
+function trackMap(a) {
+  const tr = a.track, W = 520, xs = tr.x, ys = tr.y, pad = 24;
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  for (let i = 0; i < tr.n; i++) { xmin = Math.min(xmin, xs[i]); xmax = Math.max(xmax, xs[i]); ymin = Math.min(ymin, ys[i]); ymax = Math.max(ymax, ys[i]); }
+  const xr = (xmax - xmin) || 1, yr = (ymax - ymin) || 1;
+  let H = Math.floor(yr * ((W - 2 * pad) / xr) + 2 * pad); H = Math.max(260, Math.min(H, 700));
+  const scale = Math.min((W - 2 * pad) / xr, (H - 2 * pad) / yr), cx = (xmax + xmin) / 2, cy = (ymax + ymin) / 2;
+  const X = x => W / 2 + (x - cx) * scale, Y = y => H / 2 - (y - cy) * scale;
+  const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="GPS track coloured by flying state">`];
+  const fly = a.flying; let seg = 0;
+  for (let i = 1; i <= tr.n; i++) if (i === tr.n || fly[i] !== fly[seg]) {
+    const pts = []; for (let k = seg; k < Math.min(i + 1, tr.n); k++) pts.push(`${X(xs[k]).toFixed(1)},${Y(ys[k]).toFixed(1)}`);
+    o.push(`<polyline class="${fly[seg] ? 'track-on' : 'track-off'}" points="${pts.join(' ')}"/>`); seg = i; }
+  const bar = 200 * scale;
+  o.push(`<line class="axis" x1="${pad}" x2="${(pad + bar).toFixed(1)}" y1="${H - 12}" y2="${H - 12}"/><text class="tick" x="${pad}" y="${H - 16}">200 m</text>`);
+  if (a.wind.downwind_deg != null) { const ang = a.wind.downwind_deg * Math.PI / 180, ax = W - 40, ay = 40, dx = 18 * Math.sin(ang), dy = -18 * Math.cos(ang);
+    o.push(`<g><line class="axis" x1="${(ax - dx).toFixed(1)}" y1="${(ay - dy).toFixed(1)}" x2="${(ax + dx).toFixed(1)}" y2="${(ay + dy).toFixed(1)}" stroke-width="2"/><circle cx="${(ax + dx).toFixed(1)}" cy="${(ay + dy).toFixed(1)}" r="3" fill="var(--axis)"/><text class="lbl" x="${ax}" y="${ay + 34}" text-anchor="middle">wind ${compass(a.wind.from_deg)}</text></g>`); }
+  for (const t of a.turns) { const i = Math.floor(t.mid_s), x = X(xs[i]), y = Y(ys[i]);
+    o.push(`<g tabindex="0" ${tipAttr(turnRows(t))}><circle class="m ${t.kind === 'tack' ? 'tack' : t.outcome}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7"/><text class="num" x="${x.toFixed(1)}" y="${(y - 10).toFixed(1)}" text-anchor="middle">${t.idx}</text><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" style="pointer-events:all"/></g>`); }
+  o.push('</svg>'); return o.join('\n');
+}
+// A calendar x axis for the history charts: sessions sit at their date, gaps are real time.
+function timeScale(times, x0, x1) {
+  const DAY = 86400000, lo = Math.min(...times), hi = Math.max(...times), span = Math.max(hi - lo, 7 * DAY);
+  const pad = Math.max(2 * DAY, span * 0.05), tmin = lo - pad, tmax = hi + pad;
+  const X = t => x0 + (x1 - x0) * (t - tmin) / (tmax - tmin);
+  const days = (tmax - tmin) / DAY, want = Math.max(2, Math.floor((x1 - x0) / 90)), ticks = [];
+  const monthShort = d => d.toLocaleDateString(undefined, { month: 'short' }), dayLabel = d => `${d.getDate()} ${monthShort(d)}`;
+  if (days / want <= 14) {
+    const step = [1, 2, 7, 14].find(st => days / st <= want) || 14, d = new Date(tmin); d.setHours(0, 0, 0, 0);
+    if (step >= 7) d.setDate(d.getDate() - ((d.getDay() + 6) % 7));  // back to Monday
+    for (; d.getTime() <= tmax; d.setDate(d.getDate() + step)) if (d.getTime() >= tmin) ticks.push({ x: X(d.getTime()), label: dayLabel(d) });
+  } else {
+    const months = days / 30.4, step = [1, 2, 3, 6, 12].find(st => months / st <= want) || 12, d = new Date(tmin); d.setDate(1); d.setHours(0, 0, 0, 0);
+    for (; d.getTime() <= tmax; d.setMonth(d.getMonth() + step)) if (d.getTime() >= tmin) ticks.push({ x: X(d.getTime()), label: step >= 12 || d.getMonth() === 0 ? `${monthShort(d)} ${d.getFullYear()}` : monthShort(d) });
+  }
+  return { X, ticks, bw: Math.max(6, Math.min(18, (x1 - x0) / Math.max(12, days) * 0.9)) };
+}
+function roundedBar(cx, bw, y1, top, cls) {
+  const h = y1 - top, r = Math.min(4, h / 2), l = (cx - bw / 2).toFixed(1), rt = (cx + bw / 2).toFixed(1), tp = top.toFixed(1);
+  return `<path class="${cls}" d="M${l},${y1} V${(y1 - h + r).toFixed(1)} Q${l},${tp} ${(cx - bw / 2 + r).toFixed(1)},${tp} H${(cx + bw / 2 - r).toFixed(1)} Q${rt},${tp} ${rt},${(y1 - h + r).toFixed(1)} V${y1} Z"/>`;
+}
+function bars(items, ymax, fmt, opt) {
+  const { W = 520, H = 260, ystep = 25, xlabel = '', baseline = null, highlightMax = true, aria = '', time = false } = opt || {};
+  const x0 = 40, x1 = W - 10, y0 = 14, y1 = H - 30, n = Math.max(1, items.length), band = (x1 - x0) / n;
+  const ts = time && items.length ? timeScale(items.map(it => it.t), x0, x1) : null;
+  const bw = ts ? ts.bw : Math.min(24, band - 2), hitW = ts ? Math.max(bw + 6, 14) : band;
+  const Y = v => y1 - (y1 - y0) * v / ymax;
+  const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">`];
+  for (let v = 0; v <= ymax + 0.01; v += ystep) o.push(`<line class="grid" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="tick" x="${x0 - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`);
+  let best = -1; if (items.length && highlightMax) items.forEach((it, k) => { if (best < 0 || it.v > items[best].v) best = k; });
+  items.forEach((it, k) => {
+    const cx = ts ? ts.X(it.t) : x0 + band * (k + 0.5), v = Math.min(it.v, ymax), h = y1 - Y(v);
+    const openAttr = it.open ? ` data-open="${esc(it.open)}" class="openable" role="link"` : '';
+    if (it.xMark) o.push(`<g class="x-fall" tabindex="0"${openAttr} ${tipAttr(it.tip)}><line x1="${(cx - 5).toFixed(1)}" y1="${y1 - 14}" x2="${(cx + 5).toFixed(1)}" y2="${y1 - 4}"/><line x1="${(cx - 5).toFixed(1)}" y1="${y1 - 4}" x2="${(cx + 5).toFixed(1)}" y2="${y1 - 14}"/><rect class="hit" x="${(cx - hitW / 2).toFixed(1)}" y="${y0}" width="${hitW.toFixed(1)}" height="${y1 - y0}" style="pointer-events:all"/></g>`);
+    else { o.push(`<g tabindex="0"${openAttr} ${tipAttr(it.tip)}>${roundedBar(cx, bw, y1, y1 - h, 'bar')}<rect class="hit" x="${(cx - hitW / 2).toFixed(1)}" y="${y0}" width="${hitW.toFixed(1)}" height="${y1 - y0}"/></g>`);
+      if (k === best) o.push(`<text class="num" x="${cx.toFixed(1)}" y="${(y1 - h - 5).toFixed(1)}" text-anchor="middle">${esc(it.label)}</text>`); }
+    if (!ts && (band >= 16 || k % 2 === 0)) o.push(`<text class="tick" x="${cx.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${esc(it.x)}</text>`);
+  });
+  if (ts) for (const tk of ts.ticks) o.push(`<line class="grid" x1="${tk.x.toFixed(1)}" x2="${tk.x.toFixed(1)}" y1="${y1}" y2="${y1 + 4}"/><text class="tick" x="${tk.x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${esc(tk.label)}</text>`);
+  if (baseline != null) o.push(`<line class="thresh" x1="${x0}" x2="${x1}" y1="${Y(baseline).toFixed(1)}" y2="${Y(baseline).toFixed(1)}"/>`);
+  o.push(`<line class="axis" x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}"/>`);
+  if (xlabel) o.push(`<text class="lbl" x="${x1}" y="${y1 + 28}" text-anchor="end">${esc(xlabel)}</text>`);
+  o.push('</svg>'); return o.join('\n');
+}
+// Time surfed and time in the air per session: the solid part of each bar is the time flying.
+function sessionTimeChart(rows) {
+  const W = 1060, H = 240, x0 = 40, x1 = W - 10, y0 = 14, y1 = H - 30;
+  const ts = timeScale(rows.map(r => r.start_ms), x0, x1), bw = ts.bw, hitW = Math.max(bw + 6, 14);
+  const topMin = Math.max(30, ...rows.map(r => r.duration_s / 60)), step = topMin <= 90 ? 15 : topMin <= 240 ? 30 : 60, ymax = niceMax(topMin * 1.1, step);
+  const Y = v => y1 - (y1 - y0) * v / ymax, fm = v => v >= 60 ? `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')} h` : `${f0(v)} min`;
+  const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Time surfed and time in the air per session">`];
+  for (let v = 0; v <= ymax + 0.01; v += step) o.push(`<line class="grid" x1="${x0}" x2="${x1}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="tick" x="${x0 - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${fm(v)}</text>`);
+  let best = -1; rows.forEach((r, k) => { if (best < 0 || r.flying_s > rows[best].flying_s) best = k; });
+  rows.forEach((r, k) => {
+    const cx = ts.X(r.start_ms), surf = r.duration_s / 60, fly = r.flying_s / 60;
+    const tip = [[mmss(r.duration_s), 'surfed'], [mmss(r.flying_s), 'in the air'], [`${f0(r.flying_pct)}%`, 'of the session'], [new Date(r.start_ms).toLocaleString(), r.name || r.filename], ['Click to open', '']];
+    o.push(`<g tabindex="0" data-open="${esc(r.id)}" class="openable" role="link" ${tipAttr(tip)}>${roundedBar(cx, bw, y1, Y(Math.min(surf, ymax)), 'bar-outer')}${roundedBar(cx, bw, y1, Y(Math.min(fly, ymax)), 'bar')}<rect class="hit" x="${(cx - hitW / 2).toFixed(1)}" y="${y0}" width="${hitW.toFixed(1)}" height="${y1 - y0}"/></g>`);
+    if (k === best) o.push(`<text class="num" x="${cx.toFixed(1)}" y="${(Y(Math.min(surf, ymax)) - 5).toFixed(1)}" text-anchor="middle">${mmss(r.flying_s)} of ${mmss(r.duration_s)}</text>`);
+  });
+  for (const tk of ts.ticks) o.push(`<line class="grid" x1="${tk.x.toFixed(1)}" x2="${tk.x.toFixed(1)}" y1="${y1}" y2="${y1 + 4}"/><text class="tick" x="${tk.x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${esc(tk.label)}</text>`);
+  o.push(`<line class="axis" x1="${x0}" x2="${x1}" y1="${y1}" y2="${y1}"/></svg>`);
+  return o.join('\n');
+}
+function retentionChart(a) {
+  const items = a.turns.filter(t => t.kind !== 'tack').map(t => t.outcome === 'stop' ? { v: 0, x: String(t.idx), tip: turnRows(t), xMark: true, label: '' } : { v: t.retention * 100, x: String(t.idx), tip: turnRows(t), label: `${f0(t.retention * 100)}%` });
+  const ymax = niceMax(Math.max(100, ...items.map(i => i.v)) * 1.05, 25);
+  return bars(items, ymax, v => `${f0(v)}%`, { xlabel: 'jibe #', baseline: 100, aria: 'Speed retained through each jibe' });
+}
+function flightsChart(a) {
+  const items = a.flights.map(f => ({ v: f.duration_s, x: String(f.idx), label: mmss(f.duration_s), tip: [[mmss(f.duration_s), `flight ${f.idx}`], [`${(f.distance_m / 1000).toFixed(2)} km`, 'distance'], [`${f1(f.max_speed_kmh)} km/h`, 'max speed'], [`${f1(f.avg_speed_kmh)} km/h`, 'avg speed'], [mmss(f.start_s), 'start'], [f.ended_by, 'ended by']] }));
+  const top = Math.max(60, ...items.map(i => i.v)), step = top <= 600 ? 60 : top <= 1500 ? 120 : 300;
+  return bars(items, niceMax(top * 1.08, step), v => mmss(v), { W: 1060, H: 240, ystep: step, xlabel: 'flight #', aria: 'Duration of each flight' });
+}
+const pill = (outcome, aborted) => `<span class="pill ${outcome}"><i></i>${outcome === 'stop' ? 'full stop' : outcome}${aborted ? ' (aborted)' : ''}</span>`;
+function jibeTable(a) {
+  const r = ['<table><thead><tr><th>#</th><th>time</th><th class=l>turn</th><th class=l>kind</th><th>entry</th><th>min</th><th>exit</th><th>+10 s</th><th>retained</th><th>score</th><th class=l>outcome</th></tr></thead><tbody>'];
+  for (const t of a.turns) r.push(`<tr class="${t.kind}"><td>${t.idx}</td><td>${mmss(t.mid_s)}</td><td class=l>${t.direction} ${f0(Math.abs(t.heading_change_deg))}°</td><td class=l>${t.kind}</td><td>${f1(t.entry_speed_kmh)}</td><td>${f1(t.min_speed_kmh)}</td><td>${f1(t.exit_speed_kmh)}</td><td>${f1(t.speed_after_kmh)}</td><td>${f0(t.retention * 100)}%</td><td>${f0(t.score)} ${t.grade}</td><td class=l>${pill(t.outcome, t.aborted)}</td></tr>`);
+  r.push("</tbody></table><p class=sub style='margin:8px 0 0'>Speeds in km/h. Retained = exit speed ÷ entry speed (6 s averages either side of the turn).</p>");
+  const s = a.stats, cap = `${s.turns_total} turn${s.turns_total === 1 ? '' : 's'} entered at foiling speed: ${s.jibes_total} jibe${s.jibes_total === 1 ? '' : 's'} (counted in the summary above)`
+    + (s.tacks_total ? ` and ${s.tacks_total} tack${s.tacks_total === 1 ? '' : 's'} (shown greyed, not counted as jibes)` : '') + '.';
+  return a.turns.length ? `<p class=sub style='margin:0 0 10px'>${esc(cap)}</p>` + r.join('') : '<p class=sub>No turns detected.</p>';
+}
+function flightTable(a) {
+  const r = ['<table><thead><tr><th>#</th><th>start</th><th>length</th><th>distance</th><th>max</th><th>avg</th><th class=l>ended by</th></tr></thead><tbody>'];
+  for (const f of a.flights) r.push(`<tr><td>${f.idx}</td><td>${mmss(f.start_s)}</td><td>${mmss(f.duration_s)}</td><td>${(f.distance_m / 1000).toFixed(2)} km</td><td>${f1(f.max_speed_kmh)}</td><td>${f1(f.avg_speed_kmh)}</td><td class=l>${esc(f.ended_by)}</td></tr>`);
+  return r.join('') + '</tbody></table>';
+}
+function stopTable(a) {
+  if (!a.stops.length) return '<p class=sub>No full stops detected.</p>';
+  const r = ['<table><thead><tr><th>#</th><th>time</th><th>speed before</th><th>still</th><th>back flying</th><th class=l>likely</th><th class=l>where</th></tr></thead><tbody>'];
+  for (const f of a.stops) r.push(`<tr><td>${f.idx}</td><td>${mmss(f.time_s)}</td><td>${f1(f.speed_before_kmh)} km/h</td><td>${mmss(f.stopped_s)}</td><td>${f.recovery_s == null ? 'never' : mmss(f.recovery_s)}</td><td class=l>${esc(f.likely)}</td><td class=l>${f.in_turn ? 'during jibe ' + f.in_turn : 'on a straight'}</td></tr>`);
+  return r.join('') + `</tbody></table><p class=sub style='margin:8px 0 0'>Quick restart = flying again within ${a.params.waterStop} s (probably stayed on the board). Long stop = probably in the water. The watch cannot tell the two apart directly.</p>`;
+}
+function methodText(a) {
+  const p = a.params, w = a.wind;
+  let wind;
+  if (w.method === 'user') wind = 'set by you';
+  else if (w.method === 'turn headings') {
+    wind = `estimated from your turns: wingfoil turns are nearly always jibes, so the average mid-turn heading of ${w.turns_used} turns (which agree ${f0(w.turn_agreement * 100)}%) is taken as downwind, confidence ${w.confidence}`;
+    if (w.drift_downwind_deg != null) wind += `; as a cross-check you drifted ${f0(w.drift_m)} m over ${mmss(w.drift_s)} while stopped, towards ${compass(w.drift_downwind_deg)}`;
+  } else if (w.from_deg != null) wind = `estimated from how you drifted while stopped (${f0(w.drift_m)} m over ${mmss(w.drift_s)}), confidence ${w.confidence}, because there were too few turns to use`;
+  else wind = 'unknown, so every turn is reported as a jibe';
+  const s = a.stats, gps = s.gps_points_dropped ? ` ${s.gps_points_dropped} of ${s.gps_points_total} GPS points were rejected as glitches (they implied more than ${f0(s.gps_speed_cap_kmh)} km/h, typically a dropout followed by a position jump) and bridged by interpolation.` : '';
+  return `<p><b>Resampling.</b> The Garmin track is "smart recorded" (a point only when something changes), so it is first interpolated to one sample per second. Speed comes from the ${a.track.speedSource === 'device' ? 'watch itself' : 'GPS positions (no device speed in this file)'}.${gps}</p>
+<p><b>Flying.</b> The watch cannot see the board, so flight is inferred from speed: you are counted as flying once speed reaches ${f0(p.flyOn)} km/h and until it drops below ${f0(p.flyOff)} km/h. Flights shorter than ${p.minFlight} s are ignored. Speeds between ${f0(p.stop)} and ${f0(p.flyOff)} km/h count as taxiing; below ${f0(p.stop)} km/h you are standing still.</p>
+<p><b>Turns.</b> Heading is taken from the GPS track over a 4 s window. A sustained heading rate above ${f0(p.turnRate)}°/s that adds up to at least ${f0(p.turnMinDeg)}° is a turn. A smaller turn (over ${f0(p.abortedTurnMinDeg)}°) that ends in a full stop is counted as an aborted attempt. Only turns entered at foiling speed are listed.</p>
+<p><b>Jibe or tack.</b> Wind direction is ${wind}. A turn whose mid-point heading is within 90° of downwind is a jibe, otherwise a tack.</p>
+<p><b>Outcome and quality.</b> <i>Clean</i>: speed never dropped below ${f0(p.flyOff)} km/h through the turn and 5 s after. <i>Touchdown</i>: flight was lost but you kept moving. <i>Full stop</i>: speed fell below ${f0(p.stop)} km/h within ${p.fallWindow} s after the turn. Retention is the mean speed in the ${p.exitWindow} s after the turn divided by the mean speed in the ${p.entryWindow} s before. Score = 60% retention + 40% (minimum speed ÷ entry speed), capped at 100; a touchdown caps at 54 and a full stop scores 0. Grades: A ≥ 85, B ≥ 70, C ≥ 55, D below, F for a full stop.</p>
+<p><b>Full stops.</b> Any flight followed by a standstill (below ${f0(p.stop)} km/h) within ${p.fallWindow} s. The stop at the end of the session is not counted. GPS speed reads zero whether you are in the water or standing on the board, so stops are split by how long it took to fly again: within ${p.waterStop} s is a <i>quick restart</i> (probably still on the board), longer is a <i>long stop</i> (probably a swim).</p>`;
+}
+function windNotice(a) {
+  const w = a.wind, s = a.stats;
+  if (w.method === 'user' || !s.turns_total) return '';
+  if (w.from_deg == null) return `<p class="notice">Wind direction could not be estimated (not enough drift while standing still), so every turn is counted as a jibe.</p>`;
+  if (w.confidence === 'low' || (s.tacks_total && s.tacks_total >= s.jibes_total)) return `<p class="notice">Wind direction is a rough estimate (${esc(compass(w.from_deg))}, from ${esc(w.method)}), so the split into ${s.jibes_total} jibe${s.jibes_total === 1 ? '' : 's'} and ${s.tacks_total} tack${s.tacks_total === 1 ? '' : 's'} may be wrong. The turn table lists every turn.</p>`;
+  return '';
+}
+function renderReport(a, meta) {
+  const s = a.stats, title = s.name || meta.filename.replace(/\.[^.]+$/, '') || 'Wingfoil session';
+  const html = `
+<h1 style="margin-top:32px">${esc(title)}</h1>
+<p class="sub">${esc(s.start_local)} · ${(s.distance_m / 1000).toFixed(2)} km in ${mmss(s.duration_s)} · ${esc(s.device || 'Garmin')} · ${esc(meta.filename)}</p>
+<div class="actions" style="margin:0 0 16px"><button class="small" id="dl-json">Download JSON</button><button class="small" id="dl-html">Save report as HTML</button></div>
+${windNotice(a)}
+<div class="kpis">
+${kpi('Time in the air', mmss(s.flying_s), `${f0(s.flying_pct)}% of the session · ${(s.flying_distance_m / 1000).toFixed(1)} km flying`, true)}
+${kpi('Flights', String(s.flights), `longest ${mmss(s.longest_flight_s)} · median ${mmss(s.median_flight_s)}`)}
+${kpi('Jibes landed', `${s.jibes_clean} / ${s.jibes_total}`, `${f0(s.jibe_success_pct)}% clean · ${s.jibes_touchdown} touchdown · ${s.jibes_stop} full stop` + (s.tacks_total ? ` · ${s.tacks_total} tack${s.tacks_total === 1 ? '' : 's'} not counted` : ''))}
+${kpi('Speed kept through jibes', `${f0(s.jibe_avg_retention_pct)}%`, `avg score ${f0(s.jibe_avg_score)}/100 · right ${s.jibes_right_clean}/${s.jibes_right}, left ${s.jibes_left_clean}/${s.jibes_left}`)}
+${kpi('Full stops', String(s.stops), `${s.stops_quick} quick restart · ${s.stops_long} long (likely in water) · ${s.stops_in_turns} in jibes`)}
+${kpi('Top speed (km/h)', f1(s.max_speed_kmh), `avg flying ${f1(s.avg_speed_flying_kmh)} km/h · standing still ${mmss(s.stopped_s)}`)}
+</div>
+<h2>Speed over the session</h2>
+<div class="card">
+<div class="legend"><span><i class="key-line"></i>Speed (km/h)</span><span><i class="key-rect"></i>Flying</span><span><i class="key-dot" style="background:var(--good)"></i>Jibe, clean</span><span><i class="key-dot" style="background:var(--warn)"></i>Jibe, touchdown</span><span><i class="key-dot" style="background:var(--crit)"></i>Jibe, full stop</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span></div>
+${timeline(a)}
+</div>
+<div class="two">
+<div><h2>Track</h2><div class="card"><div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks (hover for details)</span></div>${trackMap(a)}</div></div>
+<div><h2>Jibe speed retention</h2><div class="card"><div class="legend"><span><i class="key-rect"></i>Exit speed as % of entry speed</span><span><b style="color:var(--crit)">×</b>Full stop</span></div>${retentionChart(a)}</div></div>
+</div>
+<h2>Flights</h2>
+<div class="card"><div class="legend"><span><i class="key-rect"></i>Flight length, in order</span></div>${flightsChart(a)}</div>
+<h2>Jibes and tacks</h2>
+<div class="card" style="overflow:auto">${jibeTable(a)}</div>
+<div class="two">
+<div><h2>Flight list</h2><div class="card" style="overflow:auto">${flightTable(a)}</div></div>
+<div><h2>Full stops</h2><div class="card" style="overflow:auto">${stopTable(a)}</div></div>
+</div>
+<details><summary>How these numbers are computed</summary>${methodText(a)}</details>`;
+  const root = $('#report'); root.innerHTML = html; root.classList.remove('hidden');
+  attachTooltips(root, a);
+  $('#dl-json').onclick = () => download(`${title}.json`, JSON.stringify(wingstats.toJSON(a), null, 2), 'application/json');
+  $('#dl-html').onclick = () => saveReportHtml(title);
+}
+
+// ---------------------------------------------------------------- tooltips
+const tip = $('#tip');
+function showTip(ev, rows) {
+  tip.replaceChildren();
+  for (const [v, k] of rows) { const d = document.createElement('div'), b = document.createElement('b'); b.textContent = String(v); d.appendChild(b); if (k) { const s = document.createElement('span'); s.className = 'k'; s.textContent = String(k); d.appendChild(s); } tip.appendChild(d); }
+  tip.style.display = 'block'; moveTip(ev);
+}
+function moveTip(ev) { const w = tip.offsetWidth, h = tip.offsetHeight; let x = ev.clientX + 14, y = ev.clientY + 14; if (x + w > innerWidth - 8) x = ev.clientX - w - 14; if (y + h > innerHeight - 8) y = ev.clientY - h - 14; tip.style.left = x + 'px'; tip.style.top = y + 'px'; }
+const hideTip = () => { tip.style.display = 'none'; };
+function attachTooltips(root, a) {
+  const svg = root.querySelector('#timeline');
+  if (svg && a) {
+    const hit = svg.querySelector('rect.hit'), cross = svg.querySelector('.cross'), dot = svg.querySelector('.cdot'), tr = a.track;
+    const x0 = +svg.dataset.x0, x1 = +svg.dataset.x1, y0 = +svg.dataset.y0, y1 = +svg.dataset.y1, vmax = +svg.dataset.vmax, n = tr.n;
+    hit.addEventListener('pointermove', ev => {
+      const r = svg.getBoundingClientRect(), sx = (ev.clientX - r.left) * svg.viewBox.baseVal.width / r.width;
+      const i = Math.max(0, Math.min(n - 1, Math.round((sx - x0) / (x1 - x0) * (n - 1))));
+      const px = x0 + (x1 - x0) * i / (n - 1), py = y1 - (y1 - y0) * tr.speed[i] / vmax;
+      cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.style.display = 'block'; dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.style.display = 'block';
+      const rows = [[f1(tr.speed[i]) + ' km/h', 'speed'], [a.flying[i] ? 'flying' : tr.speed[i] < a.params.stop ? 'standing still' : 'taxiing', 'state'], [mmss(i), 'time']];
+      if (!isNaN(tr.hr[i])) rows.push([Math.round(tr.hr[i]) + ' bpm', 'heart rate']);
+      if (!isNaN(tr.heading[i])) rows.push([Math.round(tr.heading[i]) + '°', 'heading']);
+      showTip(ev, rows);
+    });
+    hit.addEventListener('pointerleave', () => { cross.style.display = 'none'; dot.style.display = 'none'; hideTip(); });
+  }
+  root.querySelectorAll('[data-tip]').forEach(el => {
+    const rows = () => JSON.parse(el.dataset.tip);
+    el.addEventListener('pointermove', ev => showTip(ev, rows())); el.addEventListener('pointerleave', hideTip);
+    el.addEventListener('focus', () => { const r = el.getBoundingClientRect(); showTip({ clientX: r.left + r.width / 2, clientY: r.top }, rows()); }); el.addEventListener('blur', hideTip);
+  });
+}
+
+// --------------------------------------------------------------- downloads
+function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+function saveReportHtml(title) {
+  const doc = document.documentElement.cloneNode(true);
+  for (const id of ['upload', 'history-section', 'tip']) { const el = doc.querySelector('#' + id); if (el) el.remove(); }
+  doc.querySelectorAll('script').forEach(s => s.remove());
+  const act = doc.querySelector('#report .actions'); if (act) act.remove();
+  doc.querySelector('title').textContent = title;
+  // keep hover working in the saved copy: a minimal tooltip script over data-tip only
+  const js = document.createElement('script'); js.textContent = `(${standaloneTooltips.toString()})()`; doc.querySelector('body').appendChild(js);
+  download(`${title}.html`, '<!doctype html>\n' + doc.outerHTML, 'text/html');
+}
+function standaloneTooltips() {
+  const tip = document.createElement('div'); tip.className = 'tip'; document.body.appendChild(tip);
+  const show = (ev, rows) => { tip.replaceChildren(); for (const [v, k] of rows) { const d = document.createElement('div'), b = document.createElement('b'); b.textContent = String(v); d.appendChild(b); if (k) { const s = document.createElement('span'); s.className = 'k'; s.textContent = String(k); d.appendChild(s); } tip.appendChild(d); } tip.style.display = 'block'; let x = ev.clientX + 14, y = ev.clientY + 14; if (x + tip.offsetWidth > innerWidth - 8) x = ev.clientX - tip.offsetWidth - 14; if (y + tip.offsetHeight > innerHeight - 8) y = ev.clientY - tip.offsetHeight - 14; tip.style.left = x + 'px'; tip.style.top = y + 'px'; };
+  document.querySelectorAll('[data-tip]').forEach(el => { el.addEventListener('pointermove', ev => show(ev, JSON.parse(el.dataset.tip))); el.addEventListener('pointerleave', () => { tip.style.display = 'none'; }); });
+}
+
+// ----------------------------------------------------------------- history (IndexedDB, this browser only)
+const DB_NAME = 'wingstats', STORE = 'sessions';
+function openDb() {
+  return new Promise((res, rej) => { if (!('indexedDB' in window)) return rej(new Error('no IndexedDB'));
+    const rq = indexedDB.open(DB_NAME, 1);
+    rq.onupgradeneeded = () => { const db = rq.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }); };
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+}
+async function dbAll() { try { const db = await openDb(); return await new Promise((res, rej) => { const rq = db.transaction(STORE).objectStore(STORE).getAll(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); }); } catch (e) { return []; } }
+async function dbPut(rec) { try { const db = await openDb(); await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(rec); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) { console.warn('history not saved', e); } }
+async function dbDelete(id) { try { const db = await openDb(); await new Promise((res, rej) => { const tx = db.transaction(STORE, 'readwrite'); if (id == null) tx.objectStore(STORE).clear(); else tx.objectStore(STORE).delete(id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} }
+function summaryOf(a, filename) {
+  const s = a.stats; return { id: `${s.start_utc}|${filename}`, version: wingstats.VERSION, filename, name: s.name, start_utc: s.start_utc, start_ms: a.track.t0 * 1000, duration_s: s.duration_s, distance_m: s.distance_m,
+    flying_s: s.flying_s, flying_pct: s.flying_pct, flights: s.flights, longest_flight_s: s.longest_flight_s, turns_total: s.turns_total, tacks_total: s.tacks_total, jibes_total: s.jibes_total, jibes_clean: s.jibes_clean,
+    jibe_success_pct: s.jibe_success_pct, jibe_avg_retention_pct: s.jibe_avg_retention_pct, stops: s.stops, stops_long: s.stops_long, max_speed_kmh: s.max_speed_kmh, params: a.params };
+}
+// Stored rows were computed by whatever version of the analysis was current when the file was
+// dropped. The raw file is stored too, so rows from an older version are recomputed on load,
+// which keeps the table equal to what Open shows.
+let refreshed = false;
+async function refreshStale(rows) {
+  if (refreshed) return rows; refreshed = true;
+  const stale = rows.filter(r => r.version !== wingstats.VERSION && typeof r.text === 'string');
+  if (!stale.length) return rows;
+  $('#status').textContent = `Updating ${stale.length} stored session${stale.length === 1 ? '' : 's'} to the current analysis…`;
+  await new Promise(r => setTimeout(r, 10));
+  let n = 0;
+  for (const r of stale) {
+    try {
+      const raw = wingstats.loadTrack(r.filename, r.text), track = wingstats.resample(raw), a = wingstats.analyse(track, paramsFor(r.params));
+      const rec = summaryOf(a, r.filename); rec.id = r.id; rec.text = r.text; await dbPut(rec); n++;
+    } catch (e) { console.warn('could not refresh', r.id, e); }
+  }
+  $('#status').textContent = n ? `Updated ${n} stored session${n === 1 ? '' : 's'} to the current analysis.` : '';
+  return dbAll();
+}
+async function renderHistory() {
+  const rows = (await refreshStale(await dbAll())).sort((a, b) => a.start_ms - b.start_ms);
+  const empty = $('#history-empty'), charts = $('#history-charts'), table = $('#history-table'), actions = $('#history-actions');
+  if (!rows.length) { empty.classList.remove('hidden'); charts.classList.add('hidden'); actions.classList.add('hidden'); table.innerHTML = ''; return; }
+  empty.classList.add('hidden'); charts.classList.remove('hidden'); actions.classList.remove('hidden');
+  const label = r => new Date(r.start_ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const sessionTip = r => [[mmss(r.flying_s), 'in the air'], [`${f0(r.flying_pct)}%`, 'of session'], [mmss(r.duration_s), 'session length'], [new Date(r.start_ms).toLocaleString(), r.name || r.filename], ['Click to open', '']];
+  const pct = rows.map(r => ({ v: r.flying_pct, t: r.start_ms, x: label(r), label: `${f0(r.flying_pct)}%`, tip: sessionTip(r), open: r.id }));
+  const jib = rows.map(r => ({ v: r.jibe_success_pct, t: r.start_ms, x: label(r), label: `${f0(r.jibe_success_pct)}%`, tip: [[`${r.jibes_clean} / ${r.jibes_total}`, 'jibes landed'], [`${f0(r.jibe_avg_retention_pct)}%`, 'speed kept'], [new Date(r.start_ms).toLocaleString(), r.name || r.filename], ['Click to open', '']], open: r.id }));
+  charts.innerHTML = `<div><div class="legend"><span><i class="key-rect"></i>Time surfed per session</span><span><i class="key-rect" style="background:var(--s1)"></i>Time in the air</span></div>${sessionTimeChart(rows)}</div>
+<div><div class="legend"><span><i class="key-rect"></i>Time in the air per session (% of session)</span></div>${bars(pct, 100, v => f0(v) + '%', { W: 1060, H: 240, ystep: 25, time: true, aria: 'Share of each session spent in the air' })}</div>
+<div><div class="legend"><span><i class="key-rect"></i>Jibes landed per session (%)</span></div>${bars(jib, 100, v => f0(v) + '%', { W: 1060, H: 240, ystep: 25, highlightMax: false, time: true, aria: 'Jibe success per session' })}</div>`;
+  const r = ['<table><thead><tr><th class=l>session</th><th>length</th><th>in the air</th><th>flights</th><th>jibes</th><th>tacks</th><th>speed kept</th><th>full stops</th><th>top speed</th><th class=l></th></tr></thead><tbody>'];
+  for (const s of [...rows].reverse()) r.push(`<tr><td class=l>${esc(new Date(s.start_ms).toLocaleDateString())} ${esc(s.name || s.filename)}</td><td>${mmss(s.duration_s)}</td><td>${mmss(s.flying_s)} (${f0(s.flying_pct)}%)</td><td>${s.flights}</td><td>${s.jibes_clean} / ${s.jibes_total}</td><td>${s.tacks_total == null ? '' : s.tacks_total}</td><td>${f0(s.jibe_avg_retention_pct)}%</td><td>${s.stops}</td><td>${f1(s.max_speed_kmh)}</td><td class=l><button class="small" data-open="${esc(s.id)}">Open</button> <button class="small" data-del="${esc(s.id)}">Delete</button></td></tr>`);
+  table.innerHTML = r.join('') + '</tbody></table>';
+  attachTooltips(charts, null);
+  const openStored = async id => { const rec = (await dbAll()).find(x => x.id === id); if (rec) await runText(rec.filename, rec.text, true, rec.params, rec.id); };
+  for (const el of [...table.querySelectorAll('[data-open]'), ...charts.querySelectorAll('[data-open]')]) {
+    el.onclick = () => { hideTip(); openStored(el.dataset.open); };
+    el.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); hideTip(); openStored(el.dataset.open); } };
+  }
+  table.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await dbDelete(b.dataset.del); renderHistory(); });
+}
+$('#clear-history').onclick = async () => { if (confirm('Delete all stored sessions from this browser?')) { await dbDelete(null); renderHistory(); } };
+$('#export-history').onclick = async () => { const rows = await dbAll(); download('wingstats-history.json', JSON.stringify(rows.map(({ text, ...r }) => r), null, 2), 'application/json'); };
+
+// --------------------------------------------------------------- controls
+// Analysis thresholds are not shown to users. Change them in defaultParams() in wingstats.js.
+// A stored session is re-run with the thresholds it was first analysed with.
+function paramsFor(stored) { return Object.assign(wingstats.defaultParams(), stored || {}); }
+function setError(msg) { const e = $('#error'); if (msg) { e.textContent = msg; e.classList.remove('hidden'); } else e.classList.add('hidden'); }
+async function runText(filename, text, remember, params, keepId, opt) {
+  const { silent = false } = opt || {};
+  setError(''); $('#status').textContent = silent ? `Analysing ${filename}…` : 'Analysing…';
+  await new Promise(r => setTimeout(r, 10));  // let the status paint
+  try {
+    const t0 = performance.now();
+    const raw = wingstats.loadTrack(filename, text), track = wingstats.resample(raw), a = wingstats.analyse(track, paramsFor(params));
+    renderReport(a, { filename });
+    $('#status').textContent = silent ? '' : `Done in ${Math.round(performance.now() - t0)} ms`;
+    if (remember) { const rec = summaryOf(a, filename); if (keepId) rec.id = keepId; rec.text = text; await dbPut(rec); await renderHistory(); }
+    if (new URLSearchParams(location.search).get('debug')) console.log('WINGSTATS_JSON ' + JSON.stringify(wingstats.toJSON(a)));
+    if (!silent) $('#report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  } catch (e) { console.error(e); setError((silent ? filename + ': ' : '') + (e.message || String(e))); $('#status').textContent = ''; return false; }
+}
+// Several files can be dropped at once. Anything that is not .tcx/.gpx is ignored, and a session
+// already in the history (same file name, or same start time from another export) is skipped.
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+async function handleFiles(fileList) {
+  const files = [...(fileList || [])]; if (!files.length) return;
+  const wanted = files.filter(f => /\.(tcx|gpx)$/i.test(f.name)), ignored = files.length - wanted.length;
+  const stored = await dbAll(), knownNames = new Set(stored.map(r => r.filename)), knownStarts = new Set(stored.map(r => r.start_utc));
+  const done = [], skipped = [], failed = [], reasons = [];
+  for (const f of wanted) {
+    if (knownNames.has(f.name)) { skipped.push(f.name); continue; }
+    try {
+      const text = await f.text(), raw = wingstats.loadTrack(f.name, text), track = wingstats.resample(raw);
+      const startUtc = new Date(track.t0 * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      if (knownStarts.has(startUtc)) { skipped.push(f.name); continue; }
+      if (await runText(f.name, text, true, undefined, undefined, { silent: wanted.length > 1 })) { done.push(f.name); knownNames.add(f.name); knownStarts.add(startUtc); }
+      else { failed.push(f.name); reasons.push(`${f.name}: ${$('#error').textContent}`); }
+    } catch (e) { console.warn(f.name, e); failed.push(f.name); reasons.push(`${f.name}: ${e.message || e}`); }
+  }
+  if (reasons.length) setError(reasons.join(' · '));
+  await renderHistory();
+  if (files.length > 1 || skipped.length || ignored || failed.length) {
+    const parts = [];
+    if (done.length) parts.push(`analysed ${plural(done.length, 'file')}`);
+    if (skipped.length) parts.push(`skipped ${plural(skipped.length, 'file')} already in your history (${skipped.join(', ')})`);
+    if (ignored) parts.push(`ignored ${plural(ignored, 'file')} that ${ignored === 1 ? 'is' : 'are'} not .tcx or .gpx`);
+    if (failed.length) parts.push(`could not read ${failed.join(', ')}`);
+    $('#status').textContent = parts.join(' · ').replace(/^./, c => c.toUpperCase()) + '.';
+    if (!done.length && !failed.length) setError('');
+  }
+  if (done.length) $('#report').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+$('#file').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+const drop = $('#drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFiles(e.dataTransfer.files); });
+if (new URLSearchParams(location.search).get('debug')) window.__wingstats = { dbAll, dbPut, dbDelete, runText, renderHistory, summaryOf, handleFiles };
+renderHistory();
+// ?file=path.tcx analyses a file served next to the page (handy for sharing a session link)
+const q = new URLSearchParams(location.search).get('file');
+if (q) fetch(q).then(r => { if (!r.ok) throw new Error(`Could not load ${q} (${r.status})`); return r.text(); }).then(t => runText(q.split('/').pop(), t, false)).catch(e => setError(e.message));
+})();
+</script>
+</body>
+</html>

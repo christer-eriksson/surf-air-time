@@ -1,0 +1,28 @@
+# systemd unit for the wingstats upload page on a Raspberry Pi.
+#
+#   sudo apt install python3-numpy
+#   sudo mkdir -p /opt/wingstats && sudo cp -r wingstats /opt/wingstats/
+#   sudo cp deploy/wingstats.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wingstats
+#   journalctl -u wingstats -f
+#
+# Then open http://<pi-address>:8080/ from any device on your network.
+[Unit]
+Description=wingstats - wingfoil statistics upload page
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/wingstats
+ExecStart=/usr/bin/python3 -m wingstats.server --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+# Hardening: the service needs no filesystem access beyond /tmp
+DynamicUser=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
