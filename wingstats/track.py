@@ -44,6 +44,17 @@ class Track:
         return float(self.t[-1])
 
 
+def trim_track(tr: Track, s: int, e: int) -> Track:
+    """The part of the track from sample s up to (not including) e, re-based to start at 0 s."""
+    sl = slice(s, e)
+    return Track(
+        t=tr.t[sl] - tr.t[s], t0=tr.t0 + float(tr.t[s]), lat=tr.lat[sl], lon=tr.lon[sl], x=tr.x[sl], y=tr.y[sl],
+        speed=tr.speed[sl], dist=tr.dist[sl] - tr.dist[s], hr=tr.hr[sl], heading=tr.heading[sl],
+        speed_source=tr.speed_source, gps_points_total=tr.gps_points_total, gps_points_dropped=tr.gps_points_dropped,
+        gps_speed_cap_kmh=tr.gps_speed_cap_kmh, name=tr.name, sport=tr.sport, device=tr.device, source=tr.source,
+    )
+
+
 def _interp_optional(T: np.ndarray, rel: np.ndarray, vals: list) -> np.ndarray:
     arr = np.array([np.nan if v is None else float(v) for v in vals], dtype=float)
     ok = ~np.isnan(arr)

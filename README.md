@@ -28,6 +28,10 @@ web/index.html      the page: upload, charts, tables, local history
 web/wingstats.js    the analysis (a line-for-line port of the Python package)
 ```
 
+* The track map has a faint OpenStreetMap background. The tiles are fetched
+  from openstreetmap.org, so that server learns which area is shown (never the
+  track itself). Untick "Map background" to turn it off; the choice is
+  remembered in that browser.
 * Several files can be dropped at once. Files that are not .tcx/.gpx are
   ignored, and sessions already in the history (same file name, or the same
   start time from another export) are skipped; the status line says what
@@ -39,7 +43,8 @@ web/wingstats.js    the analysis (a line-for-line port of the Python package)
   each session, time surfed with time in the air per session, jibes landed);
   click a bar or the Open button to reopen a session. Nothing is stored on the
   server.
-  History can be exported as JSON or deleted from the page. The original file
+  History can be exported as JSON, and "Clear all data" deletes every
+  stored session, file and setting the page keeps in that browser. The original file
   is stored with each row, so when the analysis changes (the `VERSION` in
   `wingstats.js`) stored rows are recomputed on the next visit and always match
   what "Open" shows.
@@ -104,6 +109,11 @@ from speed.
   retention ratio (exit ÷ entry), a 0-100 score, a grade, and an outcome:
   *clean* (never dropped below the flying threshold), *touchdown* (lost flight
   but kept moving) or *full stop* (came to a standstill).
+* **Trimming** - the session runs from the run-up to the first take-off (at
+  most 30 s of movement before it) to the first standstill after the last
+  landing (at most 30 s after it). Walking or swimming out and back is left
+  out, so session length and the share of time in the air describe the surf
+  itself. The report says how much was cut; `--no-trim` keeps everything.
 * **GPS cleaning** - after a dropout the watch often reports a position far
   from the real one and then "bounces" back, which shows up as a 60-120 km/h
   spike and a phantom turn. A sample is kept only if it is reachable from the

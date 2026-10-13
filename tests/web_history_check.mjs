@@ -46,6 +46,12 @@ try {
   out.retentionBars = await ev(`document.querySelectorAll('#report svg[aria-label="Speed retained through each jibe"] g[data-tip]').length`);
   out.tipTitles = await ev(`[...new Set([...document.querySelectorAll('#report svg g[data-tip]')].map(g => JSON.parse(g.dataset.tip)[0][0].split(' ')[0]))]`);
   out.rowsAfterOpen = await rows();
+  out.mapTiles = await ev(`[...document.querySelectorAll('#track-map image')].map(i => new URL(i.getAttribute('href')).host)`);
+  out.trimNote = await ev(`document.querySelector('#report p.sub').textContent.includes('trimmed')`);
+  await ev(`(() => { const c = document.querySelector('#basemap-toggle'); c.checked = false; c.dispatchEvent(new Event('change')); return true; })()`);
+  out.mapTilesOff = await ev(`document.querySelectorAll('#track-map image').length`);
+  out.mapPrefStored = await ev(`localStorage.getItem('wingstats.basemap')`);
+  await ev(`(() => { const c = document.querySelector('#basemap-toggle'); c.checked = true; c.dispatchEvent(new Event('change')); return true; })()`);
   await goto(BASE); await sleep(1500);
   out.statusSecondReload = await status(); out.rowsSecondReload = await rows();
   // Clicking a bar in the history charts opens that session
@@ -63,6 +69,11 @@ try {
     await __wingstats.handleFiles([f('ride_a.tcx', shift(2025)), f('ride_b.tcx', shift(2024)), f('ride_c.tcx', text), f('ride_a.tcx', shift(2025)), f('notes.txt', 'hello'), f('bad.tcx', '<nonsense>')]);
     return { status: document.querySelector('#status').textContent, error: document.querySelector('#error').textContent, errorHidden: document.querySelector('#error').classList.contains('hidden'),
       rows: [...document.querySelectorAll('#history-table tbody tr')].map(tr => tr.querySelector('td').textContent.trim()), reportTitle: document.querySelector('#report h1')?.textContent }; })()`);
+  // Clear all data: sessions, settings and the open report are gone
+  await ev(`(async () => { localStorage.setItem('wingstats.basemap', 'off'); await __wingstats.clearAllData(); return true; })()`);
+  out.cleared = await ev(`(async () => ({ rows: (await __wingstats.dbAll()).length, prefs: Object.keys(localStorage).filter(k => k.startsWith('wingstats.')).length,
+    reportHidden: document.querySelector('#report').classList.contains('hidden'), emptyShown: !document.querySelector('#history-empty').classList.contains('hidden'),
+    button: document.querySelector('#clear-history').textContent }))()`);
 } catch (e) { out.error = String(e); }
 console.log(JSON.stringify(out));
 ws.close(); chrome.kill();

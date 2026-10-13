@@ -135,8 +135,9 @@ def test_real_export_matches_garmin_summary():
     tr = resample(load_track(DATA / "activity_24669790521.tcx"))
     a = analyse(tr)
     summary = read_csv_summary(DATA / "activity_24669790521.csv")
-    assert abs(a.stats.duration_s - summary.duration_s) <= 2
-    assert abs(a.stats.distance_m - summary.distance_m) < 20
+    assert abs(a.stats.recorded_duration_s - summary.duration_s) <= 2
+    assert a.stats.duration_s <= a.stats.recorded_duration_s
+    assert abs(a.stats.recorded_distance_m - summary.distance_m) < 20
     assert abs(a.stats.max_speed_kmh - summary.max_speed_kmh) < 0.5
     assert a.stats.flights > 5
     assert a.stats.jibes_total > 10
@@ -231,7 +232,7 @@ def test_wind_from_turn_headings_beats_drift():
         raw.lon.append(lon + x / (111_320 * math.cos(math.radians(lat))))
         raw.speed.append(v); raw.alt.append(None); raw.dist.append(None); raw.hr.append(None)
         x += v * math.sin(math.radians(h)); y += v * math.cos(math.radians(h))
-    a = analyse(resample(raw))
+    a = analyse(resample(raw), Params(trim=False))  # keep the misleading drift before and after
     assert a.wind.method == "turn headings"
     assert a.wind.turns_used >= 5 and a.wind.turn_agreement > 0.95
     assert abs(((a.wind.downwind_deg - 135) + 180) % 360 - 180) < 15
@@ -250,3 +251,35 @@ def test_real_sessions_are_jibes_with_sane_speeds(name):
     assert s.turns_total >= 10
     assert s.tacks_total <= 1, (s.tacks_total, s.jibes_total)
     assert a.wind.method == "turn headings" and a.wind.confidence in ("high", "medium")
+
+
+def test_session_is_trimmed_to_the_surf():
+    """Walking out before the first take-off and back after the last landing is cut."""
+    from wingstats.track import resample
+    raw = synthetic_track()
+    walk_in, walk_out = 120, 90
+    t_first = raw.time[0]
+    # prepend a walk/swim out at 4 km/h and append the way back
+    pre = RawTrack(name="walk", has_device_speed=True)
+    for i in range(walk_in):
+        pre.time.append(t_first - walk_in + i); pre.lat.append(raw.lat[0] - (walk_in - i) * 1.1 / 111_320)
+        pre.lon.append(raw.lon[0]); pre.speed.append(4 / 3.6); pre.alt.append(None); pre.dist.append(None); pre.hr.append(None)
+    for name in ("time", "lat", "lon", "speed", "alt", "dist", "hr"):
+        setattr(raw, name, getattr(pre, name) + getattr(raw, name))
+    t_last = raw.time[-1]
+    for i in range(1, walk_out + 1):
+        raw.time.append(t_last + i); raw.lat.append(raw.lat[-1] + 1.1 / 111_320); raw.lon.append(raw.lon[-1])
+        raw.speed.append(4 / 3.6); raw.alt.append(None); raw.dist.append(None); raw.hr.append(None)
+    full = analyse(resample(raw), Params(trim=False))
+    a = analyse(resample(raw))
+    s = a.stats
+    assert s.recorded_duration_s == full.stats.duration_s
+    assert s.trimmed_start_s >= walk_in + 25        # the walk plus the stopped drift before the run-up
+    assert s.trimmed_end_s >= walk_out + 40         # the drift after the last stop plus the walk back
+    assert abs(s.duration_s + s.trimmed_start_s + s.trimmed_end_s - s.recorded_duration_s) <= 1
+    assert s.flying_s == full.stats.flying_s and s.flights == full.stats.flights
+    assert s.jibes_total == full.stats.jibes_total
+    # untrimmed, the walk back makes the final stop look like a fall; trimmed it is the session end
+    assert s.stops == 2 and full.stats.stops == 3
+    assert s.flying_pct > full.stats.flying_pct
+    assert a.flights[-1].ended_by == "session end"

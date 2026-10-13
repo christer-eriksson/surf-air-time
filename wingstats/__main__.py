@@ -34,6 +34,8 @@ def main(argv=None) -> int:
     ap.add_argument("--min-flight", type=int, default=Params.min_flight_s, help="shortest flight in seconds")
     ap.add_argument("--water-stop", type=int, default=Params.water_stop_s,
                     help="a full stop with a longer recovery than this (seconds) is reported as a long stop, likely in the water")
+    ap.add_argument("--no-trim", action="store_true",
+                    help="keep the whole recording (by default the walk/swim out before the first flight and back after the last is cut)")
     ap.add_argument("--no-html", action="store_true", help="skip the HTML report")
     ap.add_argument("--open", action="store_true", help="open the HTML report in your web browser when done")
     ap.add_argument("--quiet", action="store_true", help="do not print the text report")
@@ -43,7 +45,8 @@ def main(argv=None) -> int:
     raw = load_track(src)
     track = resample(raw)
     params = Params(fly_on_kmh=args.fly_on, fly_off_kmh=args.fly_off, stop_kmh=args.stop,
-                    min_flight_s=args.min_flight, wind_from_deg=args.wind_from, water_stop_s=args.water_stop)
+                    min_flight_s=args.min_flight, wind_from_deg=args.wind_from, water_stop_s=args.water_stop,
+                    trim=not args.no_trim)
     result = analyse(track, params)
 
     csv_path = args.csv or src.with_suffix(".csv")

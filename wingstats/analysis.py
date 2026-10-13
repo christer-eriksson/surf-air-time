@@ -45,6 +45,9 @@ class Params:
     exit_window_s: int = 6          # speed averaging window after the turn
     after_s: int = 10               # "speed regained" look-ahead after the turn
     wind_from_deg: Optional[float] = None  # override wind direction (degrees FROM)
+    trim: bool = True               # cut the walk/swim out before the first flight and back after the last
+    trim_lead_s: int = 30           # keep at most this much moving time before the first take-off
+    trim_tail_s: int = 30           # and at most this much after the last landing
 
 
 @dataclass
@@ -165,6 +168,10 @@ class SessionStats:
     gps_points_total: int = 0
     gps_points_dropped: int = 0
     gps_speed_cap_kmh: float = 0.0
+    recorded_duration_s: float = 0.0  # length of the recording before trimming
+    recorded_distance_m: float = 0.0  # distance of the recording before trimming
+    trimmed_start_s: float = 0.0      # cut before the first take-off
+    trimmed_end_s: float = 0.0        # cut after the last landing
 
 
 @dataclass
@@ -544,8 +551,44 @@ def summarise(tr: Track, fly: np.ndarray, flights, turns, stops, wind, p: Params
     )
 
 
+def session_window(tr: Track, fly: np.ndarray, p: Params) -> Optional[tuple[int, int]]:
+    """The surf itself: from the run-up to the first take-off to the stop after the last landing.
+
+    Before the first flight the rider is walking or swimming out, and after the last one
+    coming back in; neither says anything about foiling.  The run-up is the uninterrupted
+    stretch of movement (>= stop speed) just before take-off, at most trim_lead_s; the end
+    is the first standstill after the last landing, at most trim_tail_s later.
+    """
+    idx = np.where(fly)[0]
+    if not len(idx):
+        return None
+    n = len(tr)
+    s = int(idx[0])
+    lead = 0
+    while s > 0 and lead < p.trim_lead_s and tr.speed[s - 1] >= p.stop_kmh:
+        s -= 1
+        lead += 1
+    e = int(idx[-1]) + 1
+    tail = 0
+    while e < n and tail < p.trim_tail_s:
+        e += 1
+        tail += 1
+        if tr.speed[e - 1] < p.stop_kmh:
+            break
+    return s, e
+
+
 def analyse(tr: Track, p: Optional[Params] = None) -> Analysis:
+    from .track import trim_track
     p = p or Params()
+    recorded, recorded_m = tr.duration_s, float(tr.dist[-1] - tr.dist[0])
+    cut_start = cut_end = 0.0
+    if p.trim:
+        win = session_window(tr, detect_flying(tr.speed, p), p)
+        if win and (win[0] > 0 or win[1] < len(tr)):
+            s, e = win
+            cut_start, cut_end = float(tr.t[s]), float(tr.t[-1] - tr.t[e - 1])
+            tr = trim_track(tr, s, e)
     fly = detect_flying(tr.speed, p)
     flights = build_flights(tr, fly)
     stops = detect_stops(tr, fly, flights, p)
@@ -553,6 +596,8 @@ def analyse(tr: Track, p: Optional[Params] = None) -> Analysis:
     wind = estimate_wind(tr, fly, p, turns)
     classify_turns(turns, wind)
     stats = summarise(tr, fly, flights, turns, stops, wind, p)
+    stats.recorded_duration_s, stats.recorded_distance_m = recorded, recorded_m
+    stats.trimmed_start_s, stats.trimmed_end_s = cut_start, cut_end
     return Analysis(track=tr, params=p, flying=fly, flights=flights, turns=turns, stops=stops, wind=wind, stats=stats)
 
 

@@ -16,6 +16,7 @@ const wingstats = (() => {
       flyOn: 13.0, flyOff: 10.0, minFlight: 5, stop: 3.0, fallWindow: 15, waterStop: 30,
       turnRate: 5.0, turnEdgeRate: 2.0, turnMinDeg: 100.0, abortedTurnMinDeg: 55.0, turnMergeGap: 4,
       entryWindow: 6, exitWindow: 6, after: 10, windFrom: null,
+      trim: true, trimLead: 30, trimTail: 30,  // cut the walk/swim out before the first flight and back after the last
     };
   }
 
@@ -368,16 +369,37 @@ const wingstats = (() => {
       gps_points_total: tr.gpsPointsTotal, gps_points_dropped: tr.gpsPointsDropped, gps_speed_cap_kmh: tr.gpsSpeedCapKmh,
     };
   }
+  // The surf itself: from the run-up to the first take-off (uninterrupted movement, at most trimLead s)
+  // to the first standstill after the last landing (at most trimTail s). See session_window in Python.
+  function sessionWindow(tr, fly, p) {
+    let first = -1, last = -1; for (let i = 0; i < tr.n; i++) if (fly[i]) { if (first < 0) first = i; last = i; }
+    if (first < 0) return null;
+    let s = first, lead = 0; while (s > 0 && lead < p.trimLead && tr.speed[s - 1] >= p.stop) { s--; lead++; }
+    let e = last + 1, tail = 0; while (e < tr.n && tail < p.trimTail) { e++; tail++; if (tr.speed[e - 1] < p.stop) break; }
+    return [s, e];
+  }
+  function trimTrack(tr, s, e) {
+    const cut = a => a.slice(s, e), t = cut(tr.t).map(v => v - tr.t[s]), dist = cut(tr.dist).map(v => v - tr.dist[s]);
+    return Object.assign({}, tr, { t, t0: tr.t0 + tr.t[s], lat: cut(tr.lat), lon: cut(tr.lon), x: cut(tr.x), y: cut(tr.y), speed: cut(tr.speed), dist,
+      hr: cut(tr.hr), heading: cut(tr.heading), n: e - s, get durationS() { return this.t[this.n - 1]; } });
+  }
   function analyse(tr, p) {
     p = p || defaultParams();
+    const recorded = tr.durationS, recordedM = tr.dist[tr.n - 1] - tr.dist[0]; let cutStart = 0, cutEnd = 0;
+    if (p.trim) {
+      const win = sessionWindow(tr, detectFlying(tr.speed, p), p);
+      if (win && (win[0] > 0 || win[1] < tr.n)) { const [s, e] = win; cutStart = tr.t[s]; cutEnd = tr.t[tr.n - 1] - tr.t[e - 1]; tr = trimTrack(tr, s, e); }
+    }
     const fly = detectFlying(tr.speed, p), flights = buildFlights(tr, fly), stops = detectStops(tr, fly, flights, p);
     const turns = detectTurns(tr, fly, stops, p), wind = estimateWind(tr, fly, p, turns); classifyTurns(turns, wind);
-    return { track: tr, params: p, flying: fly, flights, turns, stops, wind, stats: summarise(tr, fly, flights, turns, stops, wind, p) };
+    const stats = summarise(tr, fly, flights, turns, stops, wind, p);
+    Object.assign(stats, { recorded_duration_s: recorded, recorded_distance_m: recordedM, trimmed_start_s: cutStart, trimmed_end_s: cutEnd });
+    return { track: tr, params: p, flying: fly, flights, turns, stops, wind, stats };
   }
   function toJSON(a) { return { stats: a.stats, flights: a.flights, turns: a.turns, stops: a.stops }; }
 
   // Bump when the analysis changes: the web page recomputes stored sessions whose version differs.
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
 
   return { VERSION, defaultParams, loadTrack, readTcx, readGpx, resample, analyse, toJSON, angDiff, mod360 };
 })();

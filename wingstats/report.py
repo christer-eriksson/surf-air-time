@@ -38,6 +38,9 @@ def text_report(a: Analysis, csv_summary: Optional[LapSummary] = None) -> str:
     add("")
     add("SESSION")
     add(f"  Duration            {mmss(s.duration_s):>10}   distance {s.distance_m/1000:.2f} km")
+    if s.trimmed_start_s or s.trimmed_end_s:
+        add(f"  Trimmed             {mmss(s.trimmed_start_s)} before the first take-off, {mmss(s.trimmed_end_s)} after the last landing "
+            f"(recording {mmss(s.recorded_duration_s)}, {s.recorded_distance_m/1000:.2f} km)")
     add(f"  Moving              {mmss(s.moving_s):>10}   avg {s.avg_speed_moving_kmh:.1f} km/h, max {s.max_speed_kmh:.1f} km/h")
     add(f"  In the water        {mmss(s.stopped_s):>10}   (< {s.params.stop_kmh:.0f} km/h)")
     add(f"  Taxiing on the board{mmss(s.taxi_s):>10}   (moving but not flying)")

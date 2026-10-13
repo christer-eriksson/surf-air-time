@@ -466,6 +466,7 @@ def _method(a: Analysis) -> str:
     return f"""
 <p><b>Resampling.</b> The Garmin track is "smart recorded" (a point only when something changes), so it is first
 interpolated to one sample per second. Speed comes from the {a.track.speed_source} ({a.track.device or 'watch'}).{gps_txt}</p>
+<p><b>Trimming.</b> The session runs from the run-up to the first take-off (at most {p.trim_lead_s} s of movement before it) to the first standstill after the last landing (at most {p.trim_tail_s} s after it). Walking or swimming out and back is left out, so session length and the share of time in the air describe the surf itself.</p>
 <p><b>Flying.</b> The watch cannot see the board, so flight is inferred from speed: you are counted as flying once speed
 reaches {p.fly_on_kmh:.0f} km/h and until it drops below {p.fly_off_kmh:.0f} km/h. Flights shorter than {p.min_flight_s} s are ignored.
 Speeds between {p.stop_kmh:.0f} and {p.fly_off_kmh:.0f} km/h count as taxiing; below {p.stop_kmh:.0f} km/h you are in the water.</p>
@@ -492,6 +493,9 @@ def html_report(a: Analysis, csv_summary: Optional[LapSummary] = None) -> str:
     tr = a.track
     title = html.escape(s.name or "Wingfoil session")
     sub = f"{html.escape(s.start_utc)} · {s.distance_m / 1000:.2f} km in {mmss(s.duration_s)} · {html.escape(s.device or 'Garmin')}"
+    if s.trimmed_start_s or s.trimmed_end_s:
+        sub += (f" · trimmed {mmss(s.trimmed_start_s)} before the first take-off and {mmss(s.trimmed_end_s)} after the last landing"
+                f" (recording {mmss(s.recorded_duration_s)})")
     if csv_summary:
         sub += f" · Garmin summary: {mmss(csv_summary.duration_s)}, {csv_summary.distance_m / 1000:.2f} km, max {csv_summary.max_speed_kmh:.1f} km/h"
     kpis = "".join([

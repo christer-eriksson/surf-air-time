@@ -29,6 +29,8 @@ h2{font-size:17px;margin:32px 0 10px;font-weight:600}
 .kpi .note{color:var(--muted);font-size:12.5px}
 .kpi.hero .value{font-size:48px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--ink-2);font-size:13px;margin:0 0 8px}
+.maptoggle{display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin-left:auto}
+svg .attrib{font-size:9px;fill:var(--muted)} svg .attrib a{fill:var(--muted);text-decoration:underline}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .key-line{width:18px;height:0;border-top:2px solid var(--s1)}
 .key-rect{width:14px;height:12px;background:var(--s1-wash);border:1px solid var(--s1)}
@@ -117,7 +119,7 @@ td .small{margin-left:4px}
     <div id="history-table" style="overflow:auto"></div>
     <div class="actions hidden" id="history-actions">
       <button class="small" id="export-history">Export history (JSON)</button>
-      <button class="small" id="clear-history">Delete all sessions</button>
+      <button class="small" id="clear-history">Clear all data</button>
     </div>
   </div>
 </section>
@@ -125,7 +127,7 @@ td .small{margin-left:4px}
 <section id="report" class="hidden"></section>
 </main>
 <div id="tip" class="tip"></div>
-<script src="wingstats.js?v=0.3.0"></script>
+<script src="wingstats.js?v=0.4.0"></script>
 <script>
 (function () {
 'use strict';
@@ -171,7 +173,39 @@ function timeline(a) {
   o.push(`<line class="cross" x1="0" x2="0" y1="${y0}" y2="${y1}"/><circle class="cdot m" cx="0" cy="0" r="5" style="display:none;fill:var(--s1)"/><rect class="hit" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/></svg>`);
   return o.join('\n');
 }
-function trackMap(a) {
+// Faint land/water background from the standard OpenStreetMap tiles, greyed out by an SVG filter
+// (inverted in dark mode). Only the tile images are fetched, so the tile server learns which area is
+// shown; the track itself never leaves the browser.
+const BASEMAP_KEY = 'wingstats.basemap';
+function basemapOn() { try { return localStorage.getItem(BASEMAP_KEY) !== 'off'; } catch (e) { return true; } }
+function setBasemap(on) { try { localStorage.setItem(BASEMAP_KEY, on ? 'on' : 'off'); } catch (e) {} }
+function darkTheme() { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches); }
+function basemapTiles(tr, W, H, X, Y, scale, cx, cy) {
+  const R = 6371000.0, d = 180 / Math.PI;
+  // the local metre frame the track was projected into (recovered exactly from any sample)
+  const latM = tr.lat[0] - tr.y[0] / R * d, cos0 = Math.cos(latM / d), lonM = tr.lon[0] - tr.x[0] / (R * cos0) * d;
+  const sx = lon => X((lon - lonM) / d * R * cos0), sy = lat => Y((lat - latM) / d * R);
+  const lonOf = px => lonM + (cx + (px - W / 2) / scale) / (R * cos0) * d, latOf = py => latM + (cy - (py - H / 2) / scale) / R * d;
+  const west = lonOf(0), east = lonOf(W), north = latOf(0), south = latOf(H);
+  const tx = (lon, z) => (lon + 180) / 360 * 2 ** z;
+  const ty = (lat, z) => { const r = lat / d; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z; };
+  const tlon = (x, z) => x / 2 ** z * 360 - 180, tlat = (y, z) => { const n = Math.PI - 2 * Math.PI * y / 2 ** z; return d * Math.atan(Math.sinh(n)); };
+  let z = Math.max(3, Math.min(18, Math.round(Math.log2(2 * Math.PI * R * cos0 * scale / 200))));
+  let x0, x1, y0, y1;
+  for (;; z--) { x0 = Math.floor(tx(west, z)); x1 = Math.floor(tx(east, z)); y0 = Math.floor(ty(north, z)); y1 = Math.floor(ty(south, z)); if ((x1 - x0 + 1) * (y1 - y0 + 1) <= 16 || z <= 3) break; }
+  const dark = darkTheme();
+  const o = [`<filter id="bm-filter" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/>${dark ? '<feComponentTransfer><feFuncR type="table" tableValues="1 0"/><feFuncG type="table" tableValues="1 0"/><feFuncB type="table" tableValues="1 0"/></feComponentTransfer>' : ''}</filter>`,
+             `<clipPath id="bm-clip"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath>`,
+             // tiles overhang the map; page CSS lets SVG content overflow, so clip to the map's own box
+             `<g clip-path="url(#bm-clip)"><g class="basemap" filter="url(#bm-filter)" opacity="${dark ? 0.35 : 0.4}">`];
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+    const left = sx(tlon(x, z)), right = sx(tlon(x + 1, z)), top = sy(tlat(y, z)), bottom = sy(tlat(y + 1, z));
+    o.push(`<image href="https://tile.openstreetmap.org/${z}/${x}/${y}.png" x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${(right - left + 0.5).toFixed(1)}" height="${(bottom - top + 0.5).toFixed(1)}" preserveAspectRatio="none"/>`);
+  }
+  o.push('</g></g>');
+  return o.join('');
+}
+function trackMap(a, withMap = basemapOn()) {
   const tr = a.track, W = 520, xs = tr.x, ys = tr.y, pad = 24;
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
   for (let i = 0; i < tr.n; i++) { xmin = Math.min(xmin, xs[i]); xmax = Math.max(xmax, xs[i]); ymin = Math.min(ymin, ys[i]); ymax = Math.max(ymax, ys[i]); }
@@ -180,6 +214,7 @@ function trackMap(a) {
   const scale = Math.min((W - 2 * pad) / xr, (H - 2 * pad) / yr), cx = (xmax + xmin) / 2, cy = (ymax + ymin) / 2;
   const X = x => W / 2 + (x - cx) * scale, Y = y => H / 2 - (y - cy) * scale;
   const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="GPS track coloured by flying state">`];
+  if (withMap) o.push(basemapTiles(tr, W, H, X, Y, scale, cx, cy));
   const fly = a.flying; let seg = 0;
   for (let i = 1; i <= tr.n; i++) if (i === tr.n || fly[i] !== fly[seg]) {
     const pts = []; for (let k = seg; k < Math.min(i + 1, tr.n); k++) pts.push(`${X(xs[k]).toFixed(1)},${Y(ys[k]).toFixed(1)}`);
@@ -190,6 +225,7 @@ function trackMap(a) {
     o.push(`<g><line class="axis" x1="${(ax - dx).toFixed(1)}" y1="${(ay - dy).toFixed(1)}" x2="${(ax + dx).toFixed(1)}" y2="${(ay + dy).toFixed(1)}" stroke-width="2"/><circle cx="${(ax + dx).toFixed(1)}" cy="${(ay + dy).toFixed(1)}" r="3" fill="var(--axis)"/><text class="lbl" x="${ax}" y="${ay + 34}" text-anchor="middle">wind ${compass(a.wind.from_deg)}</text></g>`); }
   for (const t of a.turns) { const i = Math.floor(t.mid_s), x = X(xs[i]), y = Y(ys[i]);
     o.push(`<g tabindex="0" ${tipAttr(turnRows(t))}><circle class="m ${t.kind === 'tack' ? 'tack' : t.outcome}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7"/><text class="num" x="${x.toFixed(1)}" y="${(y - 10).toFixed(1)}" text-anchor="middle">${t.idx}</text><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" style="pointer-events:all"/></g>`); }
+  if (withMap) o.push(`<text class="attrib" x="${W - 6}" y="${H - 6}" text-anchor="end">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</text>`);
   o.push('</svg>'); return o.join('\n');
 }
 // A calendar x axis for the history charts: sessions sit at their date, gaps are real time.
@@ -296,6 +332,7 @@ function methodText(a) {
   else wind = 'unknown, so every turn is reported as a jibe';
   const s = a.stats, gps = s.gps_points_dropped ? ` ${s.gps_points_dropped} of ${s.gps_points_total} GPS points were rejected as glitches (they implied more than ${f0(s.gps_speed_cap_kmh)} km/h, typically a dropout followed by a position jump) and bridged by interpolation.` : '';
   return `<p><b>Resampling.</b> The Garmin track is "smart recorded" (a point only when something changes), so it is first interpolated to one sample per second. Speed comes from the ${a.track.speedSource === 'device' ? 'watch itself' : 'GPS positions (no device speed in this file)'}.${gps}</p>
+<p><b>Trimming.</b> The session runs from the run-up to the first take-off (at most ${p.trimLead} s of movement before it) to the first standstill after the last landing (at most ${p.trimTail} s after it). Walking or swimming out and back is left out, so session length and the share of time in the air describe the surf itself.</p>
 <p><b>Flying.</b> The watch cannot see the board, so flight is inferred from speed: you are counted as flying once speed reaches ${f0(p.flyOn)} km/h and until it drops below ${f0(p.flyOff)} km/h. Flights shorter than ${p.minFlight} s are ignored. Speeds between ${f0(p.stop)} and ${f0(p.flyOff)} km/h count as taxiing; below ${f0(p.stop)} km/h you are standing still.</p>
 <p><b>Turns.</b> Heading is taken from the GPS track over a 4 s window. A sustained heading rate above ${f0(p.turnRate)}°/s that adds up to at least ${f0(p.turnMinDeg)}° is a turn. A smaller turn (over ${f0(p.abortedTurnMinDeg)}°) that ends in a full stop is counted as an aborted attempt. Only turns entered at foiling speed are listed.</p>
 <p><b>Jibe or tack.</b> Wind direction is ${wind}. A turn whose mid-point heading is within 90° of downwind is a jibe, otherwise a tack.</p>
@@ -313,7 +350,7 @@ function renderReport(a, meta) {
   const s = a.stats, title = s.name || meta.filename.replace(/\.[^.]+$/, '') || 'Wingfoil session';
   const html = `
 <h1 style="margin-top:32px">${esc(title)}</h1>
-<p class="sub">${esc(s.start_local)} · ${(s.distance_m / 1000).toFixed(2)} km in ${mmss(s.duration_s)} · ${esc(s.device || 'Garmin')} · ${esc(meta.filename)}</p>
+<p class="sub">${esc(s.start_local)} · ${(s.distance_m / 1000).toFixed(2)} km in ${mmss(s.duration_s)} · ${esc(s.device || 'Garmin')} · ${esc(meta.filename)}${s.trimmed_start_s || s.trimmed_end_s ? ` · trimmed ${mmss(s.trimmed_start_s)} before the first take-off and ${mmss(s.trimmed_end_s)} after the last landing (recording ${mmss(s.recorded_duration_s)})` : ''}</p>
 <div class="actions" style="margin:0 0 16px"><button class="small" id="dl-json">Download JSON</button><button class="small" id="dl-html">Save report as HTML</button></div>
 ${windNotice(a)}
 <div class="kpis">
@@ -330,7 +367,7 @@ ${kpi('Top speed (km/h)', f1(s.max_speed_kmh), `avg flying ${f1(s.avg_speed_flyi
 ${timeline(a)}
 </div>
 <div class="two">
-<div><h2>Track</h2><div class="card"><div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks (hover for details)</span></div>${trackMap(a)}</div></div>
+<div><h2>Track</h2><div class="card"><div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks (hover for details)</span><label class="maptoggle" title="Map tiles are loaded from openstreetmap.org, which sees the area shown. Your track stays in this browser."><input type="checkbox" id="basemap-toggle"${basemapOn() ? ' checked' : ''}> Map background</label></div><div id="track-map">${trackMap(a)}</div></div></div>
 <div><h2>Jibe speed retention</h2><div class="card"><div class="legend"><span><i class="key-rect"></i>Exit speed as % of entry speed</span><span><b style="color:var(--crit)">×</b>Full stop</span></div>${retentionChart(a)}</div></div>
 </div>
 <h2>Flights</h2>
@@ -344,6 +381,7 @@ ${timeline(a)}
 <details><summary>How these numbers are computed</summary>${methodText(a)}</details>`;
   const root = $('#report'); root.innerHTML = html; root.classList.remove('hidden');
   attachTooltips(root, a);
+  $('#basemap-toggle').onchange = ev => { setBasemap(ev.target.checked); const box = $('#track-map'); box.innerHTML = trackMap(a, ev.target.checked); attachTooltips(box, a); };
   $('#dl-json').onclick = () => download(`${title}.json`, JSON.stringify(wingstats.toJSON(a), null, 2), 'application/json');
   $('#dl-html').onclick = () => saveReportHtml(title);
 }
@@ -388,6 +426,7 @@ function saveReportHtml(title) {
   for (const id of ['upload', 'history-section', 'tip']) { const el = doc.querySelector('#' + id); if (el) el.remove(); }
   doc.querySelectorAll('script').forEach(s => s.remove());
   const act = doc.querySelector('#report .actions'); if (act) act.remove();
+  doc.querySelectorAll('.maptoggle').forEach(el => el.remove());
   doc.querySelector('title').textContent = title;
   // keep hover working in the saved copy: a minimal tooltip script over data-tip only
   const js = document.createElement('script'); js.textContent = `(${standaloneTooltips.toString()})()`; doc.querySelector('body').appendChild(js);
@@ -413,7 +452,8 @@ async function dbDelete(id) { try { const db = await openDb(); await new Promise
 function summaryOf(a, filename) {
   const s = a.stats; return { id: `${s.start_utc}|${filename}`, version: wingstats.VERSION, filename, name: s.name, start_utc: s.start_utc, start_ms: a.track.t0 * 1000, duration_s: s.duration_s, distance_m: s.distance_m,
     flying_s: s.flying_s, flying_pct: s.flying_pct, flights: s.flights, longest_flight_s: s.longest_flight_s, turns_total: s.turns_total, tacks_total: s.tacks_total, jibes_total: s.jibes_total, jibes_clean: s.jibes_clean,
-    jibe_success_pct: s.jibe_success_pct, jibe_avg_retention_pct: s.jibe_avg_retention_pct, stops: s.stops, stops_long: s.stops_long, max_speed_kmh: s.max_speed_kmh, params: a.params };
+    jibe_success_pct: s.jibe_success_pct, jibe_avg_retention_pct: s.jibe_avg_retention_pct, stops: s.stops, stops_long: s.stops_long, max_speed_kmh: s.max_speed_kmh, params: a.params,
+    recorded_start_ms: (a.track.t0 - s.trimmed_start_s) * 1000, recorded_duration_s: s.recorded_duration_s, trimmed_start_s: s.trimmed_start_s, trimmed_end_s: s.trimmed_end_s };
 }
 // Stored rows were computed by whatever version of the analysis was current when the file was
 // dropped. The raw file is stored too, so rows from an older version are recomputed on load,
@@ -458,7 +498,16 @@ async function renderHistory() {
   }
   table.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { await dbDelete(b.dataset.del); renderHistory(); });
 }
-$('#clear-history').onclick = async () => { if (confirm('Delete all stored sessions from this browser?')) { await dbDelete(null); renderHistory(); } };
+// Removes everything this page keeps in the browser: stored sessions (with their files), settings
+// such as the map background choice, and the report currently on screen.
+async function clearAllData() {
+  await dbDelete(null);
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith('wingstats.')) localStorage.removeItem(k); } catch (e) {}
+  const rep = $('#report'); rep.innerHTML = ''; rep.classList.add('hidden');
+  setError(''); $('#status').textContent = 'All data stored by this page in this browser has been deleted.';
+  await renderHistory();
+}
+$('#clear-history').onclick = async () => { if (confirm('Delete all your sessions, their files and settings from this browser? This cannot be undone.')) await clearAllData(); };
 $('#export-history').onclick = async () => { const rows = await dbAll(); download('wingstats-history.json', JSON.stringify(rows.map(({ text, ...r }) => r), null, 2), 'application/json'); };
 
 // --------------------------------------------------------------- controls
@@ -487,13 +536,13 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 async function handleFiles(fileList) {
   const files = [...(fileList || [])]; if (!files.length) return;
   const wanted = files.filter(f => /\.(tcx|gpx)$/i.test(f.name)), ignored = files.length - wanted.length;
-  const stored = await dbAll(), knownNames = new Set(stored.map(r => r.filename)), knownStarts = new Set(stored.map(r => r.start_utc));
+  const stored = await dbAll(), knownNames = new Set(stored.map(r => r.filename)), knownStarts = new Set(stored.map(r => Math.round(r.recorded_start_ms ?? r.start_ms)));  // recording start, before trimming
   const done = [], skipped = [], failed = [], reasons = [];
   for (const f of wanted) {
     if (knownNames.has(f.name)) { skipped.push(f.name); continue; }
     try {
       const text = await f.text(), raw = wingstats.loadTrack(f.name, text), track = wingstats.resample(raw);
-      const startUtc = new Date(track.t0 * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      const startUtc = Math.round(track.t0 * 1000);  // recording start, comparable with recorded_start_ms
       if (knownStarts.has(startUtc)) { skipped.push(f.name); continue; }
       if (await runText(f.name, text, true, undefined, undefined, { silent: wanted.length > 1 })) { done.push(f.name); knownNames.add(f.name); knownStarts.add(startUtc); }
       else { failed.push(f.name); reasons.push(`${f.name}: ${$('#error').textContent}`); }
@@ -517,7 +566,7 @@ const drop = $('#drop');
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFiles(e.dataTransfer.files); });
-if (new URLSearchParams(location.search).get('debug')) window.__wingstats = { dbAll, dbPut, dbDelete, runText, renderHistory, summaryOf, handleFiles };
+if (new URLSearchParams(location.search).get('debug')) window.__wingstats = { dbAll, dbPut, dbDelete, runText, renderHistory, summaryOf, handleFiles, clearAllData };
 renderHistory();
 // ?file=path.tcx analyses a file served next to the page (handy for sharing a session link)
 const q = new URLSearchParams(location.search).get('file');
