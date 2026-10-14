@@ -41,6 +41,7 @@ class Params:
     turn_min_deg: float = 100.0     # total heading change for a full turn
     aborted_turn_min_deg: float = 55.0  # a smaller turn ending in a full stop still counts as an attempt
     turn_merge_gap_s: int = 4       # merge same-direction turn pieces closer than this
+    max_turn_jump_deg: float = 90.0  # a heading jump above this in one second is a crash flip, which ends the turn
     entry_window_s: int = 6         # speed averaging window before the turn
     exit_window_s: int = 6          # speed averaging window after the turn
     after_s: int = 10               # "speed regained" look-ahead after the turn
@@ -418,8 +419,9 @@ def detect_turns(tr: Track, fly: np.ndarray, stops: list[Stop], p: Params) -> li
         merged.append((s, e))
 
     stop_times = np.array([f.time_s for f in stops]) if stops else np.array([])
+    raw_jump = np.abs(np.diff(unwrap_heading(tr.heading), prepend=np.nan))  # unsmoothed 1 s heading change
     turns: list[Turn] = []
-    for s, e in merged:
+    for k, (s, e) in enumerate(merged):
         # extend edges while the heading is still changing
         sign = np.sign(u[e - 1] - u[s]) or 1.0
         while s > 0 and moving[s - 1] and sign * rate[s - 1] >= p.turn_edge_rate_deg_s:
@@ -427,14 +429,26 @@ def detect_turns(tr: Track, fly: np.ndarray, stops: list[Stop], p: Params) -> li
         while e < n and moving[e - 1] and sign * rate[e - 1] >= p.turn_edge_rate_deg_s:
             e += 1
         e = min(e, n)
+        # A board cannot turn 90° in a second at foiling speed: such a jump is the
+        # heading flipping as the rider crashes.  The turn, if any, ended before it.
+        # The smoothed heading already feels the flip one sample early, so cut one before it.
+        for j in range(s + 1, e):
+            if raw_jump[j] > p.max_turn_jump_deg:
+                e = j - 1
+                break
+        if e - s < 3:
+            continue  # a real turn takes longer than that
         change = float(u[e - 1] - u[s])
         if abs(change) < p.aborted_turn_min_deg:
             continue
-        # full stop shortly after?
+        # full stop shortly after, and before the next turn begins?
         stop_idx = None
         if len(stop_times):
             d = stop_times - tr.t[e - 1]
-            cand = np.where((d >= -2) & (d <= p.fall_window_s + 2))[0]
+            ok = (d >= -2) & (d <= p.fall_window_s + 2)
+            if k + 1 < len(merged):
+                ok &= stop_times < tr.t[merged[k + 1][0]]
+            cand = np.where(ok)[0]
             if len(cand):
                 stop_idx = int(cand[0])
         aborted = abs(change) < p.turn_min_deg
@@ -448,7 +462,7 @@ def detect_turns(tr: Track, fly: np.ndarray, stops: list[Stop], p: Params) -> li
     # number them and link stops
     for k, t in enumerate(turns):
         t.idx = k + 1
-    for t in turns:
+    for t in reversed(turns):  # a stop belongs to the latest turn before it
         if t.outcome == "stop":
             for f in stops:
                 if t.start_s - 2 <= f.time_s <= t.end_s + p.fall_window_s + 2 and f.in_turn is None:

@@ -53,7 +53,7 @@ def test_history_rows_match_open(tmp_path):
     assert len(out["rowsAfterReload"]) == 1
     row = out["rowsAfterReload"][0]
     assert row[jibes_col] == out["expected"]["jibes"] and row[tacks_col] == out["expected"]["tacks"]
-    assert all(v.startswith("0.5.0 ") for v in out["storedVersions"])
+    assert all(v.startswith("0.5.1 ") for v in out["storedVersions"])
     assert out["kpiJibes"].startswith(f"Jibes landed: {out['expected']['jibes']} ")
     assert f"{out['expected']['tacks']} tacks" in out["turnCaption"]
     assert out["tackRowsInTable"] == int(out["expected"]["tacks"])

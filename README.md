@@ -124,8 +124,16 @@ from speed.
   from the real one and then "bounces" back, which shows up as a 60-120 km/h
   spike and a phantom turn. A sample is kept only if it is reachable from the
   neighbouring kept samples, before and after, at a plausible speed (1.4 x the
-  session's 95th-percentile speed, at least 35 km/h, at most 70 km/h). Rejected
-  samples are bridged by interpolation and the report says how many there were.
+  session's 95th-percentile speed, at least 35 km/h, at most 70 km/h). Only the
+  positions of rejected samples are bridged by interpolation; their time stamps
+  and the watch's own speed are kept, since the watch often reads 0 km/h right
+  where the positions bounce after a fall. The report says how many samples
+  were rejected.
+* **Crashes are not turns** - when you fall, the GPS heading often flips by
+  100-170° within a second. A board cannot turn 90° in a second at foiling
+  speed, so a turn is cut off at such a jump; what is left only counts if it
+  is still a real turn. The fall then shows as a full stop on a straight. A
+  stop is linked to the latest turn before it, never to an earlier one.
 * **Jibe vs tack** - wingfoil turns are nearly always jibes, so the average
   mid-turn heading of the session's turns is taken as downwind (with a
   confidence from how tightly they agree). Drift while stopped in the water is

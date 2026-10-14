@@ -133,7 +133,7 @@ td .small{margin-left:4px}
 <section id="report" class="hidden"></section>
 </main>
 <div id="tip" class="tip"></div>
-<script src="wingstats.js?v=0.5.0"></script>
+<script src="wingstats.js?v=0.5.1"></script>
 <script>
 (function () {
 'use strict';
@@ -227,7 +227,7 @@ function fitView(tr, W, H, pad) {
 }
 function trackMap(a, withMap = basemapOn(), view = null) {
   const tr = a.track, xs = tr.x, ys = tr.y, pad = 24;
-  if (!view) { const f = fitView(tr, 520, 0, pad); let H = Math.floor(f.yr * ((520 - 2 * pad) / f.xr) + 2 * pad); H = Math.max(260, Math.min(H, 700)); view = fitView(tr, 520, H, pad); }
+  if (!view) { const f = fitView(tr, 520, 0, pad); let H = Math.floor(f.yr * ((520 - 2 * pad) / f.xr) + 2 * pad); H = Math.max(260, Math.min(H, 520)); view = fitView(tr, 520, H, pad); }  // a tall course is scaled to fit; Full screen has the detail
   const { W, H, cx, cy, scale } = view;
   const X = x => W / 2 + (x - cx) * scale, Y = y => H / 2 - (y - cy) * scale;
   const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="GPS track coloured by flying state">`];

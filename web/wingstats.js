@@ -14,7 +14,7 @@ const wingstats = (() => {
   function defaultParams() {
     return {
       flyOn: 13.0, flyOff: 10.0, minFlight: 5, stop: 3.0, fallWindow: 15, waterStop: 30,
-      turnRate: 5.0, turnEdgeRate: 2.0, turnMinDeg: 100.0, abortedTurnMinDeg: 55.0, turnMergeGap: 4,
+      turnRate: 5.0, turnEdgeRate: 2.0, turnMinDeg: 100.0, abortedTurnMinDeg: 55.0, turnMergeGap: 4, maxTurnJump: 90.0,
       entryWindow: 6, exitWindow: 6, after: 10, windFrom: null,
       trim: true, trimLead: 30, trimTail: 30,  // cut the walk/swim out before the first flight and back after the last
       stillMin: 10,  // a standstill at least this long that is not a full stop is still marked
@@ -169,13 +169,15 @@ const wingstats = (() => {
   function resample(rawIn) {
     if (rawIn.time.length < 2) throw new Error('Track has fewer than two timestamped samples');
     const { keep, cap } = cleanGps(rawIn.time, rawIn.lat, rawIn.lon);
-    const raw = Object.assign({}, rawIn);
-    for (const k of ['time', 'lat', 'lon', 'alt', 'dist', 'speed', 'hr']) if (Array.isArray(rawIn[k])) raw[k] = rawIn[k].filter((_, i) => keep[i]);
-    const gpsTotal = rawIn.time.length, gpsDropped = gpsTotal - raw.time.length;
-    const t0 = raw.time[0], rel = raw.time.map(t => t - t0);
+    // The glitch is in the positions only: lat/lon are interpolated across the rejected samples,
+    // while their time stamps, device speed, distance and heart rate are kept (after a crash the
+    // watch often reports 0 km/h at exactly the samples whose positions bounce around).
+    const raw = rawIn, kept = i => keep[i] === 1;
+    const gpsTotal = rawIn.time.length, gpsDropped = gpsTotal - keep.reduce((a, v) => a + v, 0);
+    const t0 = raw.time[0], rel = raw.time.map(t => t - t0), relKept = rel.filter((_, i) => kept(i));
     const n = Math.floor(rel[rel.length - 1]) + 1;
     const T = Float64Array.from({ length: n }, (_, i) => i);
-    const lat = interp(T, rel, raw.lat), lon = interp(T, rel, raw.lon);
+    const lat = interp(T, relKept, raw.lat.filter((_, i) => kept(i))), lon = interp(T, relKept, raw.lon.filter((_, i) => kept(i)));
     const latMean = mean(Array.from(lat)), lonMean = mean(Array.from(lon)), lat0 = latMean * Math.PI / 180;
     const x = lat.map((_, i) => (lon[i] - lonMean) * Math.PI / 180 * EARTH_R * Math.cos(lat0));
     const y = lat.map(v => (v - latMean) * Math.PI / 180 * EARTH_R);
@@ -301,16 +303,23 @@ const wingstats = (() => {
       if (merged.length) { const [ps, pe] = merged[merged.length - 1]; if (s - pe <= p.turnMergeGap && sign(u[e - 1] - u[s]) === sign(u[pe - 1] - u[ps])) { merged[merged.length - 1] = [ps, e]; continue; } }
       merged.push([s, e]);
     }
-    const stopTimes = stops.map(f => f.time_s), turns = [];
-    for (let [s, e] of merged) {
+    const stopTimes = stops.map(f => f.time_s), turns = [], rawU = unwrapHeading(tr.heading);
+    const rawJump = new Float64Array(n).fill(NaN); for (let i = 1; i < n; i++) rawJump[i] = Math.abs(rawU[i] - rawU[i - 1]);  // unsmoothed 1 s heading change
+    for (let m = 0; m < merged.length; m++) {
+      let [s, e] = merged[m];
       const sg = sign(u[e - 1] - u[s]) || 1;
       while (s > 0 && moving[s - 1] && sg * rate[s - 1] >= p.turnEdgeRate) s--;
       while (e < n && moving[e - 1] && sg * rate[e - 1] >= p.turnEdgeRate) e++;
       e = Math.min(e, n);
+      // a heading jump above maxTurnJump in one second is the rider crashing, not turning: the turn ends before it
+      // (the smoothed heading feels the flip one sample early, so cut one before it)
+      for (let j = s + 1; j < e; j++) if (rawJump[j] > p.maxTurnJump) { e = j - 1; break; }
+      if (e - s < 3) continue;  // a real turn takes longer than that
       const change = u[e - 1] - u[s];
       if (Math.abs(change) < p.abortedTurnMinDeg) continue;
       let stopIdx = null;
-      for (let k = 0; k < stopTimes.length; k++) { const d = stopTimes[k] - tr.t[e - 1]; if (d >= -2 && d <= p.fallWindow + 2) { stopIdx = k; break; } }
+      const nextStart = m + 1 < merged.length ? tr.t[merged[m + 1][0]] : Infinity;
+      for (let k = 0; k < stopTimes.length; k++) { const d = stopTimes[k] - tr.t[e - 1]; if (d >= -2 && d <= p.fallWindow + 2 && stopTimes[k] < nextStart) { stopIdx = k; break; } }
       const aborted = Math.abs(change) < p.turnMinDeg;
       if (aborted && stopIdx === null) continue;
       const entry = slice(tr.speed, s - p.entryWindow, s);
@@ -318,7 +327,7 @@ const wingstats = (() => {
       turns.push(makeTurn(tr, fly, p, s, e, change, stopIdx, aborted));
     }
     turns.forEach((t, k) => { t.idx = k + 1; });
-    for (const t of turns) if (t.outcome === 'stop') for (const f of stops) if (t.start_s - 2 <= f.time_s && f.time_s <= t.end_s + p.fallWindow + 2 && f.in_turn === null) { f.in_turn = t.idx; break; }
+    for (const t of [...turns].reverse()) if (t.outcome === 'stop') for (const f of stops) if (t.start_s - 2 <= f.time_s && f.time_s <= t.end_s + p.fallWindow + 2 && f.in_turn === null) { f.in_turn = t.idx; break; }  // a stop belongs to the latest turn before it
     return turns;
   }
   function makeTurn(tr, fly, p, s, e, change, stopIdx, aborted) {
@@ -413,7 +422,7 @@ const wingstats = (() => {
   function toJSON(a) { return { stats: a.stats, flights: a.flights, turns: a.turns, stops: a.stops, standstills: a.standstills }; }
 
   // Bump when the analysis changes: the web page recomputes stored sessions whose version differs.
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.1';
 
   return { VERSION, defaultParams, loadTrack, readTcx, readGpx, resample, analyse, toJSON, angDiff, mod360 };
 })();

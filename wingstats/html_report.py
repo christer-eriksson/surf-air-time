@@ -281,7 +281,7 @@ def _map(a: Analysis) -> str:
     pad = 24
     scale = (W - 2 * pad) / xr
     H = int(yr * scale + 2 * pad)
-    H = max(260, min(H, 700))
+    H = max(260, min(H, 520))
     scale = min((W - 2 * pad) / xr, (H - 2 * pad) / yr)
     cx, cy = (xs.max() + xs.min()) / 2, (ys.max() + ys.min()) / 2
     X = lambda x: W / 2 + (x - cx) * scale

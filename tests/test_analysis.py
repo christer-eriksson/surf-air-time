@@ -283,3 +283,48 @@ def test_session_is_trimmed_to_the_surf():
     assert s.stops == 2 and full.stats.stops == 3
     assert s.flying_pct > full.stats.flying_pct
     assert a.flights[-1].ended_by == "session end"
+
+
+def test_crash_heading_flip_is_not_a_turn():
+    """Crashing to a stop flips the GPS heading by ~170° within a second; that must
+    not be counted as a jibe or tack, and the stop is a full stop on a straight."""
+    from wingstats.track import resample
+    speed, heading = [], []
+    def seg(n, v, h):
+        for _ in range(n):
+            speed.append(v / 3.6); heading.append(h)
+    seg(10, 22, 45.0)
+    seg(60, 22, 45.0)
+    speed += [v / 3.6 for v in (21, 17, 13, 8, 4, 0)]; heading += [45.0, 215.0, 215.0, 215.0, 215.0, 215.0]  # the fall
+    seg(40, 0.5, 215.0)
+    seg(10, 22, 45.0)
+    seg(60, 22, 45.0)
+    seg(3, 1.0, 45.0)
+    seg(20, 0.5, 45.0)
+    lat, lon = 57.63, 11.77
+    raw = RawTrack(name="crash", has_device_speed=True)
+    x = y = 0.0
+    for i, (v, h) in enumerate(zip(speed, heading)):
+        raw.time.append(1_700_000_000 + i)
+        raw.lat.append(lat + y / 111_320); raw.lon.append(lon + x / (111_320 * math.cos(math.radians(lat))))
+        raw.speed.append(v); raw.alt.append(None); raw.dist.append(None); raw.hr.append(None)
+        x += v * math.sin(math.radians(h)); y += v * math.cos(math.radians(h))
+    a = analyse(resample(raw))
+    assert a.stats.turns_total == 0, [(t.kind, t.heading_change_deg, t.outcome) for t in a.turns]
+    assert a.stats.stops == 1 and a.stops[0].in_turn is None
+
+
+def test_gps_cleaning_keeps_device_speed():
+    """Rejecting glitchy positions must not throw away the watch's speed at those
+    samples: a crash followed by 0 km/h readings stays a full stop."""
+    from wingstats.track import resample
+    raw = synthetic_track()
+    lat_m = 1 / 111_320
+    # at 60-63 s the positions jump 100 m away and back while the watch says 0 km/h
+    for k, dlat in ((60, 0.0), (61, 100 * lat_m), (62, 110 * lat_m), (63, 15 * lat_m)):
+        raw.lat[k] += dlat
+    for k in range(60, 75):
+        raw.speed[k] = 0.0
+    tr = resample(raw)
+    assert tr.gps_points_dropped >= 2
+    assert tr.speed[62] < 1.0 and tr.speed[70] < 1.0, (tr.speed[60:75])

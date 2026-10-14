@@ -1,6 +1,6 @@
 [project]
 name = "wingstats"
-version = "0.3.0"
+version = "0.5.1"
 description = "Wingfoil session statistics (air time, jibes, falls) from Garmin Connect exports"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]

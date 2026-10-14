@@ -122,18 +122,20 @@ def resample(raw: RawTrack, heading_min_speed_kmh: float = 4.0, heading_half_win
     if len(raw) < 2:
         raise ValueError("Track has fewer than two timestamped samples")
     t_all = np.asarray(raw.time, dtype=float)
-    keep, cap = clean_gps(t_all, np.asarray(raw.lat, dtype=float), np.asarray(raw.lon, dtype=float))
+    lat_all = np.asarray(raw.lat, dtype=float)
+    lon_all = np.asarray(raw.lon, dtype=float)
+    keep, cap = clean_gps(t_all, lat_all, lon_all)
     idx = np.where(keep)[0]
-    pick = lambda vals: [vals[i] for i in idx]  # noqa: E731
-    raw = RawTrack(time=pick(raw.time), lat=pick(raw.lat), lon=pick(raw.lon), alt=pick(raw.alt), dist=pick(raw.dist),
-                   speed=pick(raw.speed), hr=pick(raw.hr), name=raw.name, sport=raw.sport, source=raw.source,
-                   device=raw.device, has_device_speed=raw.has_device_speed)
-    t_arr = np.asarray(raw.time, dtype=float)
+    # The glitch is in the positions only: lat/lon are interpolated across the rejected
+    # samples, while their time stamps, device speed, distance and heart rate are kept
+    # (after a crash the watch often reports 0 km/h at exactly the samples whose
+    # positions bounce around).
+    t_arr = t_all
     rel = t_arr - t_arr[0]
     T = np.arange(0.0, np.floor(rel[-1]) + 1.0)
 
-    lat = np.interp(T, rel, np.asarray(raw.lat, dtype=float))
-    lon = np.interp(T, rel, np.asarray(raw.lon, dtype=float))
+    lat = np.interp(T, rel[idx], lat_all[idx])
+    lon = np.interp(T, rel[idx], lon_all[idx])
 
     lat0 = np.radians(lat.mean())
     x = np.radians(lon - lon.mean()) * EARTH_R * np.cos(lat0)
