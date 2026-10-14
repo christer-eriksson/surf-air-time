@@ -36,11 +36,12 @@ h1{font-size:26px;margin:0 0 4px;font-weight:650}
 h2{font-size:17px;margin:32px 0 10px;font-weight:600}
 .sub{color:var(--ink-2);margin:0 0 20px;font-size:14px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px}
+.kpi{padding:14px 12px}
 .kpi .label{color:var(--ink-2);font-size:13px}
-.kpi .value{font-size:30px;font-weight:600;line-height:1.1;margin:4px 0 2px}
+.kpi .value{font-size:26px;font-weight:600;line-height:1.1;margin:4px 0 2px}
 .kpi .note{color:var(--muted);font-size:12.5px}
-.kpi.hero .value{font-size:48px}
+.kpi.hero .value{font-size:40px}
 .legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--ink-2);font-size:13px;margin:0 0 8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .key-line{width:18px;height:0;border-top:2px solid var(--s1)}
@@ -521,11 +522,13 @@ def html_report(a: Analysis, csv_summary: Optional[LapSummary] = None) -> str:
     if csv_summary:
         sub += f" · Garmin summary: {mmss(csv_summary.duration_s)}, {csv_summary.distance_m / 1000:.2f} km, max {csv_summary.max_speed_kmh:.1f} km/h"
     kpis = "".join([
+        _kpi("Time surfing", mmss(s.duration_s), f"{s.distance_m / 1000:.1f} km · {mmss(s.taxi_s)} taxiing · {mmss(s.stopped_s)} standing still"
+             + (f" · {mmss(s.recorded_duration_s)} recorded" if s.trimmed_start_s or s.trimmed_end_s else ""), hero=True),
         _kpi("Time in the air", mmss(s.flying_s), f"{s.flying_pct:.0f}% of the session · {s.flying_distance_m / 1000:.1f} km flying", hero=True),
         _kpi("Flights", str(s.flights), f"longest {mmss(s.longest_flight_s)} · median {mmss(s.median_flight_s)}"),
         _kpi("Jibes landed", f"{s.jibes_clean} / {s.jibes_total}", f"{s.jibe_success_pct:.0f}% clean · {s.jibes_touchdown} touchdown · {s.jibes_stop} full stop"
              + (f" · {s.tacks_total} tack{'' if s.tacks_total == 1 else 's'} not counted" if s.tacks_total else "")),
-        _kpi("Speed kept through jibes", f"{s.jibe_avg_retention_pct:.0f}%", f"avg score {s.jibe_avg_score:.0f}/100 · right {s.jibes_right_clean}/{s.jibes_right}, left {s.jibes_left_clean}/{s.jibes_left}"),
+        _kpi("Speed kept", f"{s.jibe_avg_retention_pct:.0f}%", f"through jibes · avg score {s.jibe_avg_score:.0f}/100 · right {s.jibes_right_clean}/{s.jibes_right}, left {s.jibes_left_clean}/{s.jibes_left}"),
         _kpi("Full stops", str(s.stops), f"{s.stops_quick} quick restart · {s.stops_long} long (likely in water) · {s.stops_in_turns} in jibes"),
         _kpi("Top speed (km/h)", f"{s.max_speed_kmh:.1f}", f"avg flying {s.avg_speed_flying_kmh:.1f} km/h · in water {mmss(s.stopped_s)}"),
     ])

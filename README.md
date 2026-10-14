@@ -28,8 +28,11 @@ web/index.html      the page: upload, charts, tables, local history
 web/wingstats.js    the analysis (a line-for-line port of the Python package)
 ```
 
-* "Full screen" opens the track map over the whole window; scroll to zoom
-  (the map background sharpens as you zoom in), drag to pan, Esc to close.
+* "Full screen" opens the track map over the whole window as a small slippy
+  map: scroll, pinch or double-click to zoom, drag to pan, `0` refits the
+  track, Esc closes. Tiles are placed in Web Mercator so they line up at every
+  zoom, stay put while you move, and the previous zoom level remains visible
+  until the sharper tiles have loaded.
 * The track map has a faint OpenStreetMap background. The tiles are fetched
   from openstreetmap.org, so that server learns which area is shown (never the
   track itself). Untick "Map background" to turn it off; the choice is
