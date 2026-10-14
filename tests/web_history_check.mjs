@@ -46,6 +46,13 @@ try {
   out.retentionBars = await ev(`document.querySelectorAll('#report svg[aria-label="Speed retained through each jibe"] g[data-tip]').length`);
   out.tipTitles = await ev(`[...new Set([...document.querySelectorAll('#report svg g[data-tip]')].map(g => JSON.parse(g.dataset.tip)[0][0].split(' ')[0]))]`);
   out.rowsAfterOpen = await rows();
+  out.marks = await ev(`({ mapRed: document.querySelectorAll('#track-map .x-fall').length, mapGrey: document.querySelectorAll('#track-map .x-still').length, tlRed: document.querySelectorAll('#timeline .x-fall').length, tlGrey: document.querySelectorAll('#timeline .x-still').length })`);
+  await ev(`document.querySelector('#map-full').click(); true`); await sleep(800);
+  out.fullMap = { open: await ev(`!!document.querySelector('#mapfull svg')`), bar: await ev(`document.querySelector('#mapfull svg text.tick')?.textContent`) };
+  await ev(`(() => { const st = document.querySelector('#mapfull-stage'), r = st.getBoundingClientRect(); st.dispatchEvent(new WheelEvent('wheel', { deltaY: -800, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, cancelable: true })); return true; })()`); await sleep(500);
+  out.fullMap.barZoomed = await ev(`document.querySelector('#mapfull svg text.tick')?.textContent`);
+  await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); true`); await sleep(300);
+  out.fullMap.closed = await ev(`!document.querySelector('#mapfull')`);
   out.mapTiles = await ev(`[...document.querySelectorAll('#track-map image')].map(i => new URL(i.getAttribute('href')).host)`);
   out.trimNote = await ev(`document.querySelector('#report p.sub').textContent.includes('trimmed')`);
   await ev(`(() => { const c = document.querySelector('#basemap-toggle'); c.checked = false; c.dispatchEvent(new Event('change')); return true; })()`);

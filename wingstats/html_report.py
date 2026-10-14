@@ -62,6 +62,7 @@ svg .m.tack{fill:var(--surface);stroke:var(--ink-2);stroke-width:2}
 tr.tack td{color:var(--muted)}
 .notice{background:var(--surface);border:1px solid var(--axis);border-radius:8px;padding:10px 14px;margin:0 0 16px;color:var(--ink-2);font-size:14px}
 svg .x-fall{stroke:var(--crit);stroke-width:2;stroke-linecap:round}
+svg .x-still{stroke:var(--muted);stroke-width:2;stroke-linecap:round}
 svg .bar{fill:var(--s1)} svg .bar:hover{fill-opacity:.8}
 svg .hit{fill:transparent;stroke:none;cursor:crosshair}
 svg .cross{stroke:var(--ink-2);stroke-width:1;display:none}
@@ -130,13 +131,13 @@ $notice<div class="kpis">$kpis</div>
 <div class="card">
 <div class="legend"><span><i class="key-line"></i>Speed (km/h)</span><span><i class="key-rect"></i>Flying</span>
 <span><i class="key-dot" style="background:var(--good)"></i>Jibe, clean</span><span><i class="key-dot" style="background:var(--warn)"></i>Jibe, touchdown</span>
-<span><i class="key-dot" style="background:var(--crit)"></i>Jibe, full stop</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span></div>
+<span><i class="key-dot" style="background:var(--crit)"></i>Jibe, full stop</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span><span><b style="color:var(--muted)">×</b>Standing still (not after a flight)</span></div>
 $timeline
 </div>
 
 <div class="two">
 <div><h2>Track</h2><div class="card">
-<div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks (hover for details)</span></div>
+<div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span><span><b style="color:var(--muted)">×</b>Standing still</span></div>
 $map</div></div>
 <div><h2>Jibe speed retention</h2><div class="card">
 <div class="legend"><span><i class="key-rect"></i>Exit speed as % of entry speed</span><span><b style="color:var(--crit)">×</b>Full stop</span></div>
@@ -229,6 +230,8 @@ def _timeline(a: Analysis) -> str:
             out.append(f'<g class="x-fall" tabindex="0" data-tip="{_tip(_stop_rows(f))}">'
                        f'<line x1="{x - 5:.1f}" y1="{y - 5:.1f}" x2="{x + 5:.1f}" y2="{y + 5:.1f}"/><line x1="{x - 5:.1f}" y1="{y + 5:.1f}" x2="{x + 5:.1f}" y2="{y - 5:.1f}"/>'
                        f'<circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="12" style="pointer-events:all"/></g>')
+    for st in a.standstills:
+        out.append(_x_mark(X(int(st.start_s + st.duration_s / 2)), Y(0) - 12, "x-still", _still_rows(st)))
     # jibe markers
     for t in a.turns:
         x, y = X(int(t.mid_s)), Y(t.entry_speed_kmh) - 14
@@ -239,6 +242,17 @@ def _timeline(a: Analysis) -> str:
     out.append(f'<rect class="hit" x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}"/>')
     out.append("</svg>")
     return "\n".join(out)
+
+
+def _still_rows(x) -> list[list[str]]:
+    return [["Standing still (not right after a flight)", ""], [mmss(x.start_s), "time"], [mmss(x.duration_s), "for"],
+            ["resting, waiting for wind or swimming", ""]]
+
+
+def _x_mark(x: float, y: float, cls: str, rows: list, r: float = 5.0, hit: float = 12.0) -> str:
+    return (f'<g class="{cls}" tabindex="0" data-tip="{_tip(rows)}">'
+            f'<line x1="{x - r:.1f}" y1="{y - r:.1f}" x2="{x + r:.1f}" y2="{y + r:.1f}"/><line x1="{x - r:.1f}" y1="{y + r:.1f}" x2="{x + r:.1f}" y2="{y - r:.1f}"/>'
+            f'<circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="{hit:.0f}" style="pointer-events:all"/></g>')
 
 
 def _stop_rows(f) -> list[list[str]]:
@@ -296,6 +310,14 @@ def _map(a: Analysis) -> str:
         out.append(f'<g><line class="axis" x1="{ax - dx:.1f}" y1="{ay - dy:.1f}" x2="{ax + dx:.1f}" y2="{ay + dy:.1f}" stroke-width="2"/>'
                    f'<circle cx="{ax + dx:.1f}" cy="{ay + dy:.1f}" r="3" fill="var(--axis)"/>'
                    f'<text class="lbl" x="{ax}" y="{ay + 34}" text-anchor="middle">wind {compass(a.wind.from_deg)}</text></g>')
+    # full stops on straights (red x) and other standstills (grey x)
+    for f in a.stops:
+        if f.in_turn is None:
+            i = min(n - 1, int(f.time_s))
+            out.append(_x_mark(X(xs[i]), Y(ys[i]), "x-fall", _stop_rows(f), r=6, hit=14))
+    for st in a.standstills:
+        i = min(n - 1, int(st.start_s + st.duration_s / 2))
+        out.append(_x_mark(X(xs[i]), Y(ys[i]), "x-still", _still_rows(st), r=6, hit=14))
     # jibe markers
     for t in a.turns:
         # locate the map position from lat/lon via nearest sample

@@ -17,6 +17,7 @@ const wingstats = (() => {
       turnRate: 5.0, turnEdgeRate: 2.0, turnMinDeg: 100.0, abortedTurnMinDeg: 55.0, turnMergeGap: 4,
       entryWindow: 6, exitWindow: 6, after: 10, windFrom: null,
       trim: true, trimLead: 30, trimTail: 30,  // cut the walk/swim out before the first flight and back after the last
+      stillMin: 10,  // a standstill at least this long that is not a full stop is still marked
     };
   }
 
@@ -234,6 +235,19 @@ const wingstats = (() => {
     return stops;
   }
 
+  // Standstills of at least stillMin s that are not the full stop after a flight (resting, waiting, swimming after taxiing).
+  function detectStandstills(tr, stops, p) {
+    const out = [], stopTimes = stops.map(f => f.time_s), still = new Uint8Array(tr.n);
+    for (let i = 0; i < tr.n; i++) still[i] = tr.speed[i] < p.stop ? 1 : 0;
+    for (const [s, e] of segments(still)) {
+      if (e - s < p.stillMin) continue;
+      if (stopTimes.some(st => tr.t[s] - 1 <= st && st <= tr.t[e - 1] + 1)) continue;
+      const mid = Math.floor((s + e) / 2);
+      out.push({ idx: out.length + 1, start_s: tr.t[s], duration_s: e - s, lat: tr.lat[mid], lon: tr.lon[mid] });
+    }
+    return out;
+  }
+
   // ----------------------------------------------------------------- wind
   function reachHeadings(tr, fly) {
     const h = []; for (let i = 0; i < tr.n; i++) if (fly[i] && !isNaN(tr.heading[i])) h.push(tr.heading[i]);
@@ -336,7 +350,7 @@ const wingstats = (() => {
   function classifyTurns(turns, wind) { for (const t of turns) t.kind = wind.downwind_deg == null ? 'turn' : (Math.abs(angDiff(t.mid_heading_deg, wind.downwind_deg)) <= 90 ? 'jibe' : 'tack'); }
 
   // -------------------------------------------------------------- summary
-  function summarise(tr, fly, flights, turns, stops, wind, p) {
+  function summarise(tr, fly, flights, turns, stops, wind, p, stills) {
     const n = tr.n; let movingS = 0, flyingS = 0, taxiS = 0, hrSum = 0, hrN = 0, hrMax = -Infinity, flySpeedSum = 0, moveSpeedSum = 0, maxSpeed = 0;
     for (let i = 0; i < n; i++) {
       const mv = tr.speed[i] >= p.stop; if (mv) { movingS++; moveSpeedSum += tr.speed[i]; } if (fly[i]) { flyingS++; flySpeedSum += tr.speed[i]; } if (mv && !fly[i]) taxiS++;
@@ -365,7 +379,7 @@ const wingstats = (() => {
       tacks_total: tacks.length, tacks_clean: tacks.filter(t => t.outcome === 'clean').length,
       stops: stops.length, stops_in_turns: stops.filter(f => f.in_turn !== null).length,
       stops_quick: stops.filter(f => f.likely === 'quick restart').length, stops_long: stops.filter(f => f.likely === 'long stop').length,
-      stops_per_hour: stops.length / hours, hr_avg: hrN ? hrSum / hrN : null, hr_max: hrN ? hrMax : null, wind, params: p,
+      stops_per_hour: stops.length / hours, standstills: (stills || []).length, standstill_s: (stills || []).reduce((a, x) => a + x.duration_s, 0), hr_avg: hrN ? hrSum / hrN : null, hr_max: hrN ? hrMax : null, wind, params: p,
       gps_points_total: tr.gpsPointsTotal, gps_points_dropped: tr.gpsPointsDropped, gps_speed_cap_kmh: tr.gpsSpeedCapKmh,
     };
   }
@@ -392,14 +406,14 @@ const wingstats = (() => {
     }
     const fly = detectFlying(tr.speed, p), flights = buildFlights(tr, fly), stops = detectStops(tr, fly, flights, p);
     const turns = detectTurns(tr, fly, stops, p), wind = estimateWind(tr, fly, p, turns); classifyTurns(turns, wind);
-    const stats = summarise(tr, fly, flights, turns, stops, wind, p);
+    const stills = detectStandstills(tr, stops, p), stats = summarise(tr, fly, flights, turns, stops, wind, p, stills);
     Object.assign(stats, { recorded_duration_s: recorded, recorded_distance_m: recordedM, trimmed_start_s: cutStart, trimmed_end_s: cutEnd });
-    return { track: tr, params: p, flying: fly, flights, turns, stops, wind, stats };
+    return { track: tr, params: p, flying: fly, flights, turns, stops, wind, stats, standstills: stills };
   }
-  function toJSON(a) { return { stats: a.stats, flights: a.flights, turns: a.turns, stops: a.stops }; }
+  function toJSON(a) { return { stats: a.stats, flights: a.flights, turns: a.turns, stops: a.stops, standstills: a.standstills }; }
 
   // Bump when the analysis changes: the web page recomputes stored sessions whose version differs.
-  const VERSION = '0.4.0';
+  const VERSION = '0.5.0';
 
   return { VERSION, defaultParams, loadTrack, readTcx, readGpx, resample, analyse, toJSON, angDiff, mod360 };
 })();

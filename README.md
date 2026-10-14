@@ -28,6 +28,8 @@ web/index.html      the page: upload, charts, tables, local history
 web/wingstats.js    the analysis (a line-for-line port of the Python package)
 ```
 
+* "Full screen" opens the track map over the whole window; scroll to zoom
+  (the map background sharpens as you zoom in), drag to pan, Esc to close.
 * The track map has a faint OpenStreetMap background. The tiles are fetched
   from openstreetmap.org, so that server learns which area is shown (never the
   track itself). Untick "Map background" to turn it off; the choice is
@@ -109,6 +111,10 @@ from speed.
   retention ratio (exit ÷ entry), a 0-100 score, a grade, and an outcome:
   *clean* (never dropped below the flying threshold), *touchdown* (lost flight
   but kept moving) or *full stop* (came to a standstill).
+* **Standing still** - any other standstill of 10 s or more (resting, waiting
+  for wind, swimming after taxiing) is marked with a grey × on the speed chart
+  and the map, so every spell in the water is visible even when it is not a
+  crash. Full stops on straights are the red ×.
 * **Trimming** - the session runs from the run-up to the first take-off (at
   most 30 s of movement before it) to the first standstill after the last
   landing (at most 30 s after it). Walking or swimming out and back is left

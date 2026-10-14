@@ -53,6 +53,12 @@ svg .bar-outer{fill:var(--s1-wash);stroke:var(--s1);stroke-width:1}
 tr.tack td{color:var(--muted)}
 .notice{background:var(--surface);border:1px solid var(--axis);border-radius:8px;padding:10px 14px;margin:0 0 16px;color:var(--ink-2);font-size:14px}
 svg .x-fall{stroke:var(--crit);stroke-width:2;stroke-linecap:round}
+svg .x-still{stroke:var(--muted);stroke-width:2;stroke-linecap:round}
+.mapfull{position:fixed;inset:0;z-index:50;background:var(--plane);display:flex;flex-direction:column}
+.mapfull .bar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:10px 16px;color:var(--ink-2);font-size:13px;border-bottom:1px solid var(--border)}
+.mapfull .stage{flex:1;min-height:0;overflow:hidden;cursor:grab;touch-action:none;user-select:none}
+.mapfull .stage.dragging{cursor:grabbing}
+.mapfull .stage svg{width:100%;height:100%}
 svg .bar{fill:var(--s1)} svg .bar:hover{fill-opacity:.8}
 svg .hit{fill:transparent;stroke:none;cursor:crosshair}
 svg .cross{stroke:var(--ink-2);stroke-width:1;display:none}
@@ -127,7 +133,7 @@ td .small{margin-left:4px}
 <section id="report" class="hidden"></section>
 </main>
 <div id="tip" class="tip"></div>
-<script src="wingstats.js?v=0.4.0"></script>
+<script src="wingstats.js?v=0.5.0"></script>
 <script>
 (function () {
 'use strict';
@@ -144,6 +150,12 @@ function turnRows(t) {
   return [[`${t.kind === 'tack' ? 'Tack' : 'Jibe'} ${t.idx}: ${t.outcome === 'stop' ? 'full stop' : t.outcome}${t.aborted ? ' (aborted)' : ''}`, ''], [mmss(t.mid_s), 'time'],
     [`${f1(t.entry_speed_kmh)} → ${f1(t.min_speed_kmh)} → ${f1(t.exit_speed_kmh)} km/h`, 'entry → min → exit'], [`${f1(t.speed_after_kmh)} km/h`, '10 s after'],
     [`${f0(t.retention * 100)}%`, 'speed retained'], [`${f0(t.score)} (${t.grade})`, 'score'], [`turning ${t.direction}, ${f0(Math.abs(t.heading_change_deg))}°`, 'turn']];
+}
+function stillRows(x) {
+  return [['Standing still (not right after a flight)', ''], [mmss(x.start_s), 'time'], [mmss(x.duration_s), 'for'], ['resting, waiting for wind or swimming', '']];
+}
+function xMark(x, y, cls, rows, r = 5, hit = 12) {
+  return `<g class="${cls}" tabindex="0" ${tipAttr(rows)}><line x1="${(x - r).toFixed(1)}" y1="${(y - r).toFixed(1)}" x2="${(x + r).toFixed(1)}" y2="${(y + r).toFixed(1)}"/><line x1="${(x - r).toFixed(1)}" y1="${(y + r).toFixed(1)}" x2="${(x + r).toFixed(1)}" y2="${(y - r).toFixed(1)}"/><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${hit}" style="pointer-events:all"/></g>`;
 }
 function stopRows(f) {
   return [[`Full stop (${f.likely})`, ''], [mmss(f.time_s), 'time'], [`${f1(f.speed_before_kmh)} km/h`, 'speed before'], [mmss(f.stopped_s), 'standing still'],
@@ -168,6 +180,7 @@ function timeline(a) {
   o.push(`<polyline class="line" points="${pts.join(' ')}"/>`);
   for (const f of a.stops) if (f.in_turn === null) { const x = X(Math.floor(f.time_s)), y = Y(f.speed_before_kmh) - 12;
     o.push(`<g class="x-fall" tabindex="0" ${tipAttr(stopRows(f))}><line x1="${(x - 5).toFixed(1)}" y1="${(y - 5).toFixed(1)}" x2="${(x + 5).toFixed(1)}" y2="${(y + 5).toFixed(1)}"/><line x1="${(x - 5).toFixed(1)}" y1="${(y + 5).toFixed(1)}" x2="${(x + 5).toFixed(1)}" y2="${(y - 5).toFixed(1)}"/><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" style="pointer-events:all"/></g>`); }
+  for (const st of a.standstills) o.push(xMark(X(Math.floor(st.start_s + st.duration_s / 2)), Y(0) - 12, 'x-still', stillRows(st)));
   for (const t of a.turns) { const x = X(Math.floor(t.mid_s)), y = Y(t.entry_speed_kmh) - 14;
     o.push(`<g tabindex="0" ${tipAttr(turnRows(t))}><circle class="m ${t.kind === 'tack' ? 'tack' : t.outcome}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5"/><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="12" style="pointer-events:all"/></g>`); }
   o.push(`<line class="cross" x1="0" x2="0" y1="${y0}" y2="${y1}"/><circle class="cdot m" cx="0" cy="0" r="5" style="display:none;fill:var(--s1)"/><rect class="hit" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/></svg>`);
@@ -180,7 +193,7 @@ const BASEMAP_KEY = 'wingstats.basemap';
 function basemapOn() { try { return localStorage.getItem(BASEMAP_KEY) !== 'off'; } catch (e) { return true; } }
 function setBasemap(on) { try { localStorage.setItem(BASEMAP_KEY, on ? 'on' : 'off'); } catch (e) {} }
 function darkTheme() { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches); }
-function basemapTiles(tr, W, H, X, Y, scale, cx, cy) {
+function basemapTiles(tr, W, H, X, Y, scale, cx, cy, maxTiles = 16) {
   const R = 6371000.0, d = 180 / Math.PI;
   // the local metre frame the track was projected into (recovered exactly from any sample)
   const latM = tr.lat[0] - tr.y[0] / R * d, cos0 = Math.cos(latM / d), lonM = tr.lon[0] - tr.x[0] / (R * cos0) * d;
@@ -192,7 +205,7 @@ function basemapTiles(tr, W, H, X, Y, scale, cx, cy) {
   const tlon = (x, z) => x / 2 ** z * 360 - 180, tlat = (y, z) => { const n = Math.PI - 2 * Math.PI * y / 2 ** z; return d * Math.atan(Math.sinh(n)); };
   let z = Math.max(3, Math.min(18, Math.round(Math.log2(2 * Math.PI * R * cos0 * scale / 200))));
   let x0, x1, y0, y1;
-  for (;; z--) { x0 = Math.floor(tx(west, z)); x1 = Math.floor(tx(east, z)); y0 = Math.floor(ty(north, z)); y1 = Math.floor(ty(south, z)); if ((x1 - x0 + 1) * (y1 - y0 + 1) <= 16 || z <= 3) break; }
+  for (;; z--) { x0 = Math.floor(tx(west, z)); x1 = Math.floor(tx(east, z)); y0 = Math.floor(ty(north, z)); y1 = Math.floor(ty(south, z)); if ((x1 - x0 + 1) * (y1 - y0 + 1) <= maxTiles || z <= 3) break; }
   const dark = darkTheme();
   const o = [`<filter id="bm-filter" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/>${dark ? '<feComponentTransfer><feFuncR type="table" tableValues="1 0"/><feFuncG type="table" tableValues="1 0"/><feFuncB type="table" tableValues="1 0"/></feComponentTransfer>' : ''}</filter>`,
              `<clipPath id="bm-clip"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath>`,
@@ -205,28 +218,63 @@ function basemapTiles(tr, W, H, X, Y, scale, cx, cy) {
   o.push('</g></g>');
   return o.join('');
 }
-function trackMap(a, withMap = basemapOn()) {
-  const tr = a.track, W = 520, xs = tr.x, ys = tr.y, pad = 24;
+// The view that fits the whole track into a W x H box (centre in track metres, scale in px per metre).
+function fitView(tr, W, H, pad) {
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
-  for (let i = 0; i < tr.n; i++) { xmin = Math.min(xmin, xs[i]); xmax = Math.max(xmax, xs[i]); ymin = Math.min(ymin, ys[i]); ymax = Math.max(ymax, ys[i]); }
+  for (let i = 0; i < tr.n; i++) { xmin = Math.min(xmin, tr.x[i]); xmax = Math.max(xmax, tr.x[i]); ymin = Math.min(ymin, tr.y[i]); ymax = Math.max(ymax, tr.y[i]); }
   const xr = (xmax - xmin) || 1, yr = (ymax - ymin) || 1;
-  let H = Math.floor(yr * ((W - 2 * pad) / xr) + 2 * pad); H = Math.max(260, Math.min(H, 700));
-  const scale = Math.min((W - 2 * pad) / xr, (H - 2 * pad) / yr), cx = (xmax + xmin) / 2, cy = (ymax + ymin) / 2;
+  return { W, H, cx: (xmax + xmin) / 2, cy: (ymax + ymin) / 2, scale: Math.min((W - 2 * pad) / xr, (H - 2 * pad) / yr), xr, yr };
+}
+function trackMap(a, withMap = basemapOn(), view = null) {
+  const tr = a.track, xs = tr.x, ys = tr.y, pad = 24;
+  if (!view) { const f = fitView(tr, 520, 0, pad); let H = Math.floor(f.yr * ((520 - 2 * pad) / f.xr) + 2 * pad); H = Math.max(260, Math.min(H, 700)); view = fitView(tr, 520, H, pad); }
+  const { W, H, cx, cy, scale } = view;
   const X = x => W / 2 + (x - cx) * scale, Y = y => H / 2 - (y - cy) * scale;
   const o = [`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="GPS track coloured by flying state">`];
-  if (withMap) o.push(basemapTiles(tr, W, H, X, Y, scale, cx, cy));
+  if (withMap) o.push(basemapTiles(tr, W, H, X, Y, scale, cx, cy, Math.max(16, Math.ceil(W / 200 + 1) * Math.ceil(H / 200 + 1))));
   const fly = a.flying; let seg = 0;
   for (let i = 1; i <= tr.n; i++) if (i === tr.n || fly[i] !== fly[seg]) {
     const pts = []; for (let k = seg; k < Math.min(i + 1, tr.n); k++) pts.push(`${X(xs[k]).toFixed(1)},${Y(ys[k]).toFixed(1)}`);
     o.push(`<polyline class="${fly[seg] ? 'track-on' : 'track-off'}" points="${pts.join(' ')}"/>`); seg = i; }
-  const bar = 200 * scale;
-  o.push(`<line class="axis" x1="${pad}" x2="${(pad + bar).toFixed(1)}" y1="${H - 12}" y2="${H - 12}"/><text class="tick" x="${pad}" y="${H - 16}">200 m</text>`);
+  const barM = [20, 50, 100, 200, 500, 1000, 2000, 5000].filter(m => m * scale <= W / 3).pop() || 20, bar = barM * scale;
+  o.push(`<line class="axis" x1="${pad}" x2="${(pad + bar).toFixed(1)}" y1="${H - 12}" y2="${H - 12}"/><text class="tick" x="${pad}" y="${H - 16}">${barM >= 1000 ? barM / 1000 + ' km' : barM + ' m'}</text>`);
   if (a.wind.downwind_deg != null) { const ang = a.wind.downwind_deg * Math.PI / 180, ax = W - 40, ay = 40, dx = 18 * Math.sin(ang), dy = -18 * Math.cos(ang);
     o.push(`<g><line class="axis" x1="${(ax - dx).toFixed(1)}" y1="${(ay - dy).toFixed(1)}" x2="${(ax + dx).toFixed(1)}" y2="${(ay + dy).toFixed(1)}" stroke-width="2"/><circle cx="${(ax + dx).toFixed(1)}" cy="${(ay + dy).toFixed(1)}" r="3" fill="var(--axis)"/><text class="lbl" x="${ax}" y="${ay + 34}" text-anchor="middle">wind ${compass(a.wind.from_deg)}</text></g>`); }
+  for (const f of a.stops) if (f.in_turn === null) { const i = Math.min(tr.n - 1, Math.floor(f.time_s)); o.push(xMark(X(xs[i]), Y(ys[i]), 'x-fall', stopRows(f), 6, 14)); }
+  for (const st of a.standstills) { const i = Math.min(tr.n - 1, Math.floor(st.start_s + st.duration_s / 2)); o.push(xMark(X(xs[i]), Y(ys[i]), 'x-still', stillRows(st), 6, 14)); }
   for (const t of a.turns) { const i = Math.floor(t.mid_s), x = X(xs[i]), y = Y(ys[i]);
     o.push(`<g tabindex="0" ${tipAttr(turnRows(t))}><circle class="m ${t.kind === 'tack' ? 'tack' : t.outcome}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7"/><text class="num" x="${x.toFixed(1)}" y="${(y - 10).toFixed(1)}" text-anchor="middle">${t.idx}</text><circle class="hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="14" style="pointer-events:all"/></g>`); }
   if (withMap) o.push(`<text class="attrib" x="${W - 6}" y="${H - 6}" text-anchor="end">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</text>`);
   o.push('</svg>'); return o.join('\n');
+}
+// Full-screen map: the same drawing, re-rendered on every zoom or pan step so the map tiles are
+// fetched at the matching zoom level (scroll to zoom around the cursor, drag to pan, Esc to close).
+function openFullMap(a) {
+  if ($('#mapfull')) return;
+  const box = document.createElement('div'); box.id = 'mapfull'; box.className = 'mapfull';
+  box.innerHTML = `<div class="bar"><b>${esc(a.stats.name || 'Track')}</b><span>Scroll to zoom · drag to pan · Esc to close</span>
+    <label class="maptoggle"><input type="checkbox" id="mapfull-tiles"${basemapOn() ? ' checked' : ''}> Map background</label><button class="small" id="mapfull-close">Close</button></div><div class="stage" id="mapfull-stage"></div>`;
+  document.body.appendChild(box);
+  const stage = $('#mapfull-stage'); let view = null, raf = 0;
+  const render = () => { raf = 0; const W = stage.clientWidth || 800, H = stage.clientHeight || 600; if (!view || view.W !== W || view.H !== H) view = view ? Object.assign(view, { W, H }) : fitView(a.track, W, H, 40);
+    hideTip(); stage.innerHTML = trackMap(a, $('#mapfull-tiles').checked, view); attachTooltips(stage, null); };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(render); };
+  const fit = fitView(a.track, stage.clientWidth || 800, stage.clientHeight || 600, 40).scale;
+  stage.addEventListener('wheel', ev => { ev.preventDefault(); const r = stage.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const wx = view.cx + (px - view.W / 2) / view.scale, wy = view.cy - (py - view.H / 2) / view.scale;
+    view.scale = Math.max(fit / 4, Math.min(fit * 60, view.scale * Math.exp(-ev.deltaY * 0.0015)));
+    view.cx = wx - (px - view.W / 2) / view.scale; view.cy = wy + (py - view.H / 2) / view.scale; schedule(); }, { passive: false });
+  let drag = null;
+  stage.addEventListener('pointerdown', ev => { if (ev.button !== 0) return; drag = { x: ev.clientX, y: ev.clientY }; stage.classList.add('dragging'); stage.setPointerCapture(ev.pointerId); });
+  stage.addEventListener('pointermove', ev => { if (!drag) return; view.cx -= (ev.clientX - drag.x) / view.scale; view.cy += (ev.clientY - drag.y) / view.scale; drag = { x: ev.clientX, y: ev.clientY }; schedule(); });
+  const endDrag = () => { drag = null; stage.classList.remove('dragging'); };
+  stage.addEventListener('pointerup', endDrag); stage.addEventListener('pointercancel', endDrag);
+  const close = () => { box.remove(); removeEventListener('keydown', onKey); removeEventListener('resize', schedule); hideTip(); };
+  const onKey = ev => { if (ev.key === 'Escape') close(); };
+  addEventListener('keydown', onKey); addEventListener('resize', schedule);
+  $('#mapfull-close').onclick = close;
+  $('#mapfull-tiles').onchange = ev => { setBasemap(ev.target.checked); const t = $('#basemap-toggle'); if (t) { t.checked = ev.target.checked; $('#track-map').innerHTML = trackMap(a, ev.target.checked); attachTooltips($('#track-map'), a); } schedule(); };
+  render();
 }
 // A calendar x axis for the history charts: sessions sit at their date, gaps are real time.
 function timeScale(times, x0, x1) {
@@ -363,11 +411,11 @@ ${kpi('Top speed (km/h)', f1(s.max_speed_kmh), `avg flying ${f1(s.avg_speed_flyi
 </div>
 <h2>Speed over the session</h2>
 <div class="card">
-<div class="legend"><span><i class="key-line"></i>Speed (km/h)</span><span><i class="key-rect"></i>Flying</span><span><i class="key-dot" style="background:var(--good)"></i>Jibe, clean</span><span><i class="key-dot" style="background:var(--warn)"></i>Jibe, touchdown</span><span><i class="key-dot" style="background:var(--crit)"></i>Jibe, full stop</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span></div>
+<div class="legend"><span><i class="key-line"></i>Speed (km/h)</span><span><i class="key-rect"></i>Flying</span><span><i class="key-dot" style="background:var(--good)"></i>Jibe, clean</span><span><i class="key-dot" style="background:var(--warn)"></i>Jibe, touchdown</span><span><i class="key-dot" style="background:var(--crit)"></i>Jibe, full stop</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span><span><b style="color:var(--muted)">×</b>Standing still (not after a flight)</span></div>
 ${timeline(a)}
 </div>
 <div class="two">
-<div><h2>Track</h2><div class="card"><div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks (hover for details)</span><label class="maptoggle" title="Map tiles are loaded from openstreetmap.org, which sees the area shown. Your track stays in this browser."><input type="checkbox" id="basemap-toggle"${basemapOn() ? ' checked' : ''}> Map background</label></div><div id="track-map">${trackMap(a)}</div></div></div>
+<div><h2>Track</h2><div class="card"><div class="legend"><span><i class="key-line"></i>Flying</span><span><i class="key-line" style="border-color:var(--off)"></i>Not flying</span><span>Numbered dots = jibes, hollow = tacks</span><span><b style="color:var(--crit)">×</b>Full stop on a straight</span><span><b style="color:var(--muted)">×</b>Standing still</span><span class="mapctl" style="margin-left:auto;display:inline-flex;gap:14px;align-items:center"><label class="maptoggle" style="margin-left:0" title="Map tiles are loaded from openstreetmap.org, which sees the area shown. Your track stays in this browser."><input type="checkbox" id="basemap-toggle"${basemapOn() ? ' checked' : ''}> Map background</label><button class="small" id="map-full">Full screen</button></span></div><div id="track-map">${trackMap(a)}</div></div></div>
 <div><h2>Jibe speed retention</h2><div class="card"><div class="legend"><span><i class="key-rect"></i>Exit speed as % of entry speed</span><span><b style="color:var(--crit)">×</b>Full stop</span></div>${retentionChart(a)}</div></div>
 </div>
 <h2>Flights</h2>
@@ -381,6 +429,7 @@ ${timeline(a)}
 <details><summary>How these numbers are computed</summary>${methodText(a)}</details>`;
   const root = $('#report'); root.innerHTML = html; root.classList.remove('hidden');
   attachTooltips(root, a);
+  $('#map-full').onclick = () => openFullMap(a);
   $('#basemap-toggle').onchange = ev => { setBasemap(ev.target.checked); const box = $('#track-map'); box.innerHTML = trackMap(a, ev.target.checked); attachTooltips(box, a); };
   $('#dl-json').onclick = () => download(`${title}.json`, JSON.stringify(wingstats.toJSON(a), null, 2), 'application/json');
   $('#dl-html').onclick = () => saveReportHtml(title);
@@ -426,7 +475,7 @@ function saveReportHtml(title) {
   for (const id of ['upload', 'history-section', 'tip']) { const el = doc.querySelector('#' + id); if (el) el.remove(); }
   doc.querySelectorAll('script').forEach(s => s.remove());
   const act = doc.querySelector('#report .actions'); if (act) act.remove();
-  doc.querySelectorAll('.maptoggle').forEach(el => el.remove());
+  doc.querySelectorAll('.mapctl, #mapfull').forEach(el => el.remove());
   doc.querySelector('title').textContent = title;
   // keep hover working in the saved copy: a minimal tooltip script over data-tip only
   const js = document.createElement('script'); js.textContent = `(${standaloneTooltips.toString()})()`; doc.querySelector('body').appendChild(js);
@@ -566,7 +615,7 @@ const drop = $('#drop');
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
 drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFiles(e.dataTransfer.files); });
-if (new URLSearchParams(location.search).get('debug')) window.__wingstats = { dbAll, dbPut, dbDelete, runText, renderHistory, summaryOf, handleFiles, clearAllData };
+if (new URLSearchParams(location.search).get('debug')) window.__wingstats = { dbAll, dbPut, dbDelete, runText, renderHistory, summaryOf, handleFiles, clearAllData, openFullMap };
 renderHistory();
 // ?file=path.tcx analyses a file served next to the page (handy for sharing a session link)
 const q = new URLSearchParams(location.search).get('file');

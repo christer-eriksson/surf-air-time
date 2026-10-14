@@ -43,7 +43,7 @@ def test_js_port_matches_python(tmp_path):
     for k, v in py["stats"].items():
         if k not in skip:
             assert close(v, js["stats"][k]), f"stats.{k}: {v} != {js['stats'][k]}"
-    for sec in ("flights", "turns", "stops"):
+    for sec in ("flights", "turns", "stops", "standstills"):
         assert len(py[sec]) == len(js[sec]), sec
         for p, j in zip(py[sec], js[sec]):
             for k, v in p.items():

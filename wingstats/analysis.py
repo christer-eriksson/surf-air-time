@@ -46,6 +46,7 @@ class Params:
     after_s: int = 10               # "speed regained" look-ahead after the turn
     wind_from_deg: Optional[float] = None  # override wind direction (degrees FROM)
     trim: bool = True               # cut the walk/swim out before the first flight and back after the last
+    still_min_s: int = 10           # a standstill at least this long that is not a full stop is still marked
     trim_lead_s: int = 30           # keep at most this much moving time before the first take-off
     trim_tail_s: int = 30           # and at most this much after the last landing
 
@@ -100,6 +101,20 @@ class Stop:
     recovery_s: Optional[float]  # seconds until flying again (None if never)
     likely: str                  # "quick restart" / "long stop"
     in_turn: Optional[int] = None  # turn idx if the stop belongs to a turn
+    lat: float = 0.0
+    lon: float = 0.0
+
+
+@dataclass
+class Standstill:
+    """Standing still (below ``stop_kmh``) for a while without a flight just before it.
+
+    A full stop is the standstill right after a flight (a crash or a planned stop).
+    These are the others: resting, waiting for wind, swimming after taxiing.
+    """
+    idx: int
+    start_s: float
+    duration_s: float
     lat: float = 0.0
     lon: float = 0.0
 
@@ -161,6 +176,8 @@ class SessionStats:
     stops_quick: int
     stops_long: int
     stops_per_hour: float
+    standstills: int
+    standstill_s: float
     hr_avg: Optional[float]
     hr_max: Optional[float]
     wind: WindEstimate
@@ -184,6 +201,7 @@ class Analysis:
     stops: list[Stop]
     wind: WindEstimate
     stats: SessionStats
+    standstills: list[Standstill] = field(default_factory=list)
 
 
 # ----------------------------------------------------------------------------
@@ -297,6 +315,21 @@ def _circular_mean(deg: list[float]) -> tuple[float, float]:
     r = np.radians(deg)
     sx, sy = float(np.sin(r).sum()), float(np.cos(r).sum())
     return float(np.degrees(np.arctan2(sx, sy)) % 360), float(np.hypot(sx, sy) / len(deg))
+
+
+def detect_standstills(tr: Track, stops: list[Stop], p: Params) -> list[Standstill]:
+    """Standstills of at least ``still_min_s`` that are not the full stop after a flight."""
+    out: list[Standstill] = []
+    stop_times = [f.time_s for f in stops]
+    for s, e in _segments(tr.speed < p.stop_kmh):
+        if e - s < p.still_min_s:
+            continue
+        if any(tr.t[s] - 1 <= st <= tr.t[e - 1] + 1 for st in stop_times):
+            continue  # that one is a full stop already
+        mid = (s + e) // 2
+        out.append(Standstill(idx=len(out) + 1, start_s=float(tr.t[s]), duration_s=float(e - s),
+                              lat=float(tr.lat[mid]), lon=float(tr.lon[mid])))
+    return out
 
 
 def estimate_wind(tr: Track, fly: np.ndarray, p: Params, turns: Optional[list] = None) -> WindEstimate:
@@ -493,7 +526,7 @@ def _nearest_heading(h: np.ndarray, i: int) -> float:
 # Session summary
 # ----------------------------------------------------------------------------
 
-def summarise(tr: Track, fly: np.ndarray, flights, turns, stops, wind, p: Params) -> SessionStats:
+def summarise(tr: Track, fly: np.ndarray, flights, turns, stops, wind, p: Params, stills=None) -> SessionStats:
     from datetime import datetime, timezone
 
     n = len(tr)
@@ -544,6 +577,7 @@ def summarise(tr: Track, fly: np.ndarray, flights, turns, stops, wind, p: Params
         stops_quick=sum(f.likely == "quick restart" for f in stops),
         stops_long=sum(f.likely == "long stop" for f in stops),
         stops_per_hour=len(stops) / hours,
+        standstills=len(stills or []), standstill_s=float(sum(x.duration_s for x in (stills or []))),
         hr_avg=float(hr_ok.mean()) if len(hr_ok) else None,
         hr_max=float(hr_ok.max()) if len(hr_ok) else None,
         gps_points_total=tr.gps_points_total, gps_points_dropped=tr.gps_points_dropped, gps_speed_cap_kmh=tr.gps_speed_cap_kmh,
@@ -595,10 +629,12 @@ def analyse(tr: Track, p: Optional[Params] = None) -> Analysis:
     turns = detect_turns(tr, fly, stops, p)
     wind = estimate_wind(tr, fly, p, turns)
     classify_turns(turns, wind)
-    stats = summarise(tr, fly, flights, turns, stops, wind, p)
+    stills = detect_standstills(tr, stops, p)
+    stats = summarise(tr, fly, flights, turns, stops, wind, p, stills)
     stats.recorded_duration_s, stats.recorded_distance_m = recorded, recorded_m
     stats.trimmed_start_s, stats.trimmed_end_s = cut_start, cut_end
-    return Analysis(track=tr, params=p, flying=fly, flights=flights, turns=turns, stops=stops, wind=wind, stats=stats)
+    return Analysis(track=tr, params=p, flying=fly, flights=flights, turns=turns, stops=stops, wind=wind, stats=stats,
+                    standstills=stills)
 
 
 def to_dict(a: Analysis) -> dict:
@@ -607,5 +643,6 @@ def to_dict(a: Analysis) -> dict:
         "flights": [asdict(f) for f in a.flights],
         "turns": [asdict(t) for t in a.turns],
         "stops": [asdict(f) for f in a.stops],
+        "standstills": [asdict(x) for x in a.standstills],
     }
     return d

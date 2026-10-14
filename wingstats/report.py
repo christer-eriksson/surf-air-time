@@ -74,6 +74,7 @@ def text_report(a: Analysis, csv_summary: Optional[LapSummary] = None) -> str:
     add(f"  ...on a straight    {s.stops - s.stops_in_turns:>10}")
     add(f"  Quick restart       {s.stops_quick:>10}   flying again within {s.params.water_stop_s} s (probably stayed on the board)")
     add(f"  Long stop           {s.stops_long:>10}   longer than {s.params.water_stop_s} s (probably in the water)")
+    add(f"  Standing still          {s.standstills:4d}   {mmss(s.standstill_s)} in total, not right after a flight (resting, waiting, swimming)")
     add("  The watch cannot tell water from board; the split is by recovery time (--water-stop).")
     add("")
     add("WIND")

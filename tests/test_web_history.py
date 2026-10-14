@@ -53,7 +53,7 @@ def test_history_rows_match_open(tmp_path):
     assert len(out["rowsAfterReload"]) == 1
     row = out["rowsAfterReload"][0]
     assert row[jibes_col] == out["expected"]["jibes"] and row[tacks_col] == out["expected"]["tacks"]
-    assert all(v.startswith("0.4.0 ") for v in out["storedVersions"])
+    assert all(v.startswith("0.5.0 ") for v in out["storedVersions"])
     assert out["kpiJibes"].startswith(f"Jibes landed: {out['expected']['jibes']} ")
     assert f"{out['expected']['tacks']} tacks" in out["turnCaption"]
     assert out["tackRowsInTable"] == int(out["expected"]["tacks"])
@@ -67,6 +67,11 @@ def test_history_rows_match_open(tmp_path):
     assert out["mapTiles"] and set(out["mapTiles"]) == {"tile.openstreetmap.org"}, out["mapTiles"]
     assert out["mapTilesOff"] == 0 and out["mapPrefStored"] == "off"
     assert out["trimNote"]
+    marks = out["marks"]
+    assert marks["mapRed"] == marks["tlRed"] and marks["mapGrey"] == marks["tlGrey"], marks  # same marks on map and timeline
+    fm = out["fullMap"]
+    assert fm["open"] and fm["closed"], fm
+    assert fm["bar"] and fm["barZoomed"] and fm["bar"] != fm["barZoomed"], fm  # zooming changed the scale bar
     multi = out["multi"]
     assert "Analysed 2 files" in multi["status"], multi
     assert "skipped 2 files already in your history (ride_c.tcx, ride_a.tcx)" in multi["status"], multi
